@@ -1,32 +1,57 @@
+name: Supabase deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - frontend/supabase/**
+      - .github/workflows/supabase-deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   deploy:
+    name: Push migrations and deploy functions
     runs-on: ubuntu-latest
     env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: latest
+
+      - name: Validate required secrets
+        run: |
+          missing=0
+          for secret_name in SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_ID SUPABASE_DB_PASSWORD; do
+            if [ -z "${!secret_name}" ]; then
+              echo "::error::Missing required secret: ${secret_name}"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Link project
         working-directory: frontend
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_ID }}"
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
       - name: Push database migrations
-        if: ${{ env.SUPABASE_DB_PASSWORD != '' }}
         working-directory: frontend
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase db push --password "$SUPABASE_DB_PASSWORD"
+
       - name: Deploy edge functions
         working-directory: frontend
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           for fn in access-admin access-agency access-auth access-wallet svp-auth svp-proxy test-center-owner; do
             echo "── Deploying $fn ──"
-            supabase functions deploy "$fn" --project-ref "${{ secrets.SUPABASE_PROJECT_ID }}"
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID"
           done
