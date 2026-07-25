@@ -1,10 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Calendar, Plus, WalletCards } from "lucide-react";
+import { LayoutDashboard, Calendar, Plus, WalletCards, ClipboardList } from "lucide-react";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
 
 const navItems = [
   { to: "/dashboard", label: "Account Dashboard", icon: LayoutDashboard },
   { to: "/exam/reservations", label: "My bookings", icon: Calendar },
+  { to: "/exam/sessions", label: "Exam Sessions", icon: ClipboardList },
   { to: "/exam/booking", label: "New booking", icon: Plus },
   { to: "/wallet", label: "Wallet & credits", icon: WalletCards },
 ];
