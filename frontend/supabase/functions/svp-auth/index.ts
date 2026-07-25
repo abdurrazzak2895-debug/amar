@@ -136,44 +136,6 @@ async function signJwt(payload: Record<string, unknown>, secret: string, ttlSeco
   return `${input}.${sigB64}`;
 }
 
-async function verifyJwt(token: string, secret: string): Promise<Record<string, unknown>> {
-  const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("Invalid token");
-
-  const keyData = new TextEncoder().encode(secret);
-  const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  const input = `${parts[0]}.${parts[1]}`;
-
-  // decode signature
-  const sigB64 = parts[2].replace(/-/g, "+").replace(/_/g, "/");
-  const padded = sigB64 + "=".repeat((4 - (sigB64.length % 4)) % 4);
-  const sig = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-
-  const valid = await crypto.subtle.verify("HMAC", cryptoKey, sig, new TextEncoder().encode(input));
-  if (!valid) throw new Error("Invalid signature");
-
-  const claimsB64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-  const claimsPadded = claimsB64 + "=".repeat((4 - (claimsB64.length % 4)) % 4);
-  const claims = JSON.parse(atob(claimsPadded));
-
-  if (claims.exp && claims.exp < Math.floor(Date.now() / 1000)) throw new Error("Token expired");
-  return claims;
-}
-
-async function requireActivePortalAccount(req: Request) {
-  const token = req.headers.get("x-access-token")?.trim();
-  if (!token) throw { statusCode: 401, message: "Access Portal login is required" };
-  const secret = Deno.env.get("JWT_ACCESS_SECRET") || "";
-  if (!secret) throw { statusCode: 500, message: "Access Portal authentication is not configured" };
-  let claims: Record<string, unknown>;
-  try { claims = await verifyJwt(token, secret); }
-  catch { throw { statusCode: 401, message: "Access Portal session has expired" }; }
-  const accountId = String(claims.sub || "");
-  const { data: account } = await getSupabase().from("accounts").select("id,status").eq("id", accountId).single();
-  if (!account || account.status !== "ACTIVE") throw { statusCode: 403, message: "An active Access Portal account is required" };
-  return account;
-}
-
 function randomToken(bytes = 32): string {
   const buf = crypto.getRandomValues(new Uint8Array(bytes));
   return btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
@@ -260,7 +222,7 @@ Deno.serve(async (req) => {
       return json(await svpRequest(`/api/v1/visitor_space/occupations?${qs.toString()}`));
     }
     if (req.method === "POST" && path === "/result-verification") {
-      await requireActivePortalAccount(req);
+      // Public visitor-space lookup for the SVP /auth/login result-verification panel.
       const input = await req.json().catch(() => ({}));
       const passportNumber = String(input.passportNumber || "").trim().toUpperCase().replace(/\s+/g, "");
       const occupationKey = String(input.occupationKey || "").trim();

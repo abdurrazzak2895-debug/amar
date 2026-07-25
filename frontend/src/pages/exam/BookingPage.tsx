@@ -734,7 +734,14 @@ export default function BookingPage() {
     if (!sessions.length) return;
     let active = true;
     (async () => {
-      const ids = Array.from(new Set(sessions.map((s: any) => Number(getSessionId(s))).filter((n) => Number.isFinite(n) && n > 0)));
+      // Prefer the stable numeric_session_id (present on T2Hub-sourced sessions)
+      // over getSessionId(), which returns the encrypted_session_id token when
+      // present — Number(encryptedToken) is always NaN, so the old code silently
+      // dropped every session here whenever SVP's own encrypted ID was used.
+      // Official SVP-direct sessions have no stable numeric ID at all (confirmed
+      // from live response shape), so admin exact-mapping can only ever apply to
+      // T2Hub-sourced sessions — that's an architecture limit, not a bug to "fix" further.
+      const ids = Array.from(new Set(sessions.map((s: any) => Number(s?.numeric_session_id ?? getSessionId(s))).filter((n) => Number.isFinite(n) && n > 0)));
       if (!ids.length) return;
       const { data: maps } = await supabase
         .from("exam_session_centers")

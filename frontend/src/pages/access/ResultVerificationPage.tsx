@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { apiAuthGet } from "@/lib/api";
+import { useState, useEffect, useRef } from "react";
+import { apiAuth, apiAuthGet } from "@/lib/api";
 import "@/styles/auth-premium.css";
 import "@/styles/result-verification.css";
 
@@ -13,12 +13,71 @@ interface LaborRow {
   occupation_key?: string;
   occupation_name?: string;
   status?: string;
-  [key: string]: any;
+  [key: string]: unknown;
+}
+
+interface OccupationOption {
+  id: string;
+  name: string;
+}
+
+// SVP's /visitor_space/labors endpoint returns different shapes depending on
+// match count: an array when there are (or could be) multiple rows, but a
+// single flat object — e.g. { applicant_name, exam_result, exam_date, ... }
+// with no wrapping array at all — when there's exactly one match. Detect
+// that flat-record shape and normalize it into a one-item array.
+const RECORD_FIELD_HINTS = ["applicant_name", "exam_result", "exam_date", "test_center_name", "passport_number", "full_name"];
+function looksLikeSingleRecord(obj: Record<string, unknown>): boolean {
+  return RECORD_FIELD_HINTS.some((key) => key in obj);
+}
+
+function extractLaborRows(payload: unknown): LaborRow[] {
+  if (Array.isArray(payload)) return payload as LaborRow[];
+  if (!payload || typeof payload !== "object") return [];
+
+  const value = payload as Record<string, unknown>;
+  if (looksLikeSingleRecord(value)) return [value as LaborRow];
+
+  const nested = value.result ?? value.data ?? value.labors ?? value.items;
+  if (Array.isArray(nested)) return nested as LaborRow[];
+  if (nested && typeof nested === "object") {
+    const nestedValue = nested as Record<string, unknown>;
+    if (looksLikeSingleRecord(nestedValue)) return [nestedValue as LaborRow];
+    const nestedList = nestedValue.data ?? nestedValue.labors ?? nestedValue.items;
+    if (Array.isArray(nestedList)) return nestedList as LaborRow[];
+  }
+  return [];
+}
+
+function extractOccupationRows(payload: unknown): OccupationOption[] {
+  const pick = (val: unknown): unknown[] => {
+    if (Array.isArray(val)) return val;
+    if (val && typeof val === "object") {
+      const v = val as Record<string, unknown>;
+      for (const key of ["data", "occupations", "items"]) {
+        if (Array.isArray(v[key])) return v[key] as unknown[];
+      }
+    }
+    return [];
+  };
+  const raw = pick(payload).length ? pick(payload) : pick((payload as Record<string, unknown>)?.data);
+  return raw.map((item) => {
+    const o = item as Record<string, unknown>;
+    const id = o.id ?? o.key ?? o.occupation_id ?? o.occupation_key;
+    const name = o.name ?? o.english_name ?? o.title ?? o.occupation_name ?? "";
+    return { id: String(id ?? ""), name: String(name || `Occupation ${id ?? ""}`) };
+  }).filter((o) => o.id);
 }
 
 export default function ResultVerificationPage() {
   const [passportNumber, setPassportNumber] = useState("");
   const [occupationKey, setOccupationKey] = useState("");
+  const [occupationQuery, setOccupationQuery] = useState("");
+  const [occupationOptions, setOccupationOptions] = useState<OccupationOption[]>([]);
+  const [occupationOpen, setOccupationOpen] = useState(false);
+  const [occupationLoading, setOccupationLoading] = useState(false);
+  const [occupationError, setOccupationError] = useState("");
+  const occupationBoxRef = useRef<HTMLDivElement>(null);
   const [nationalityId, setNationalityId] = useState("BGD");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LaborRow[]>([]);
@@ -31,38 +90,81 @@ export default function ResultVerificationPage() {
       const saved = sessionStorage.getItem("selected_occupation");
       if (saved) {
         const occ = JSON.parse(saved);
-        setOccupationKey(occ.occupation_key || "");
+        if (occ.occupation_key) {
+          setOccupationKey(String(occ.occupation_key));
+          setOccupationQuery(occ.occupation_name || String(occ.occupation_key));
+        }
       }
     } catch { /* ignore */ }
   }, []);
+
+  // Debounced occupation search-as-you-type against the live SVP occupations list.
+  useEffect(() => {
+    const query = occupationQuery.trim();
+    if (query.length < 2) { setOccupationOptions([]); return; }
+    setOccupationLoading(true);
+    setOccupationError("");
+    const handle = setTimeout(() => {
+      apiAuthGet<unknown>(`/registration/occupations?per_page=20&name=${encodeURIComponent(query)}`)
+        .then((data) => setOccupationOptions(extractOccupationRows(data)))
+        .catch((err: unknown) => {
+          const value = err as { message?: string };
+          setOccupationOptions([]);
+          setOccupationError(value?.message || "Could not load occupations");
+        })
+        .finally(() => setOccupationLoading(false));
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [occupationQuery]);
+
+  // Close the dropdown when clicking outside the occupation field.
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (occupationBoxRef.current && !occupationBoxRef.current.contains(e.target as Node)) {
+        setOccupationOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  function selectOccupation(opt: OccupationOption) {
+    setOccupationKey(opt.id);
+    setOccupationQuery(opt.name);
+    setOccupationOpen(false);
+  }
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setResults([]);
     setSearched(false);
+    if (!occupationKey) {
+      setError("Please select an occupation from the search results.");
+      return;
+    }
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
-        passport_number: passportNumber.trim(),
-        occupation_key: occupationKey.trim(),
-        nationality_id: nationalityId.trim(),
-        locale: "en",
+      const data = await apiAuth<unknown>("/result-verification", {
+        passportNumber,
+        occupationKey,
+        nationalityId,
       });
-      const data = await apiAuthGet<any>(`/registration/labors?${qs.toString()}`);
-      const list = Array.isArray(data) ? data : (data?.data ?? data?.labors ?? data?.items ?? []);
+      const list = extractLaborRows(data);
       setResults(list);
       setSearched(true);
       if (list.length === 0) setError("No labor records found for the given criteria.");
-    } catch (err: any) {
-      setError(err?.message || err?.data?.message || "Search failed");
+    } catch (err: unknown) {
+      const value = err as { message?: string; data?: { message?: unknown } };
+      const detail = value.data?.message || value.message || "Search failed";
+      setError(typeof detail === "string" ? detail : JSON.stringify(detail));
       setSearched(true);
     } finally {
       setLoading(false);
     }
   }
 
-  function renderCell(key: string, value: any, row: LaborRow, idx: number) {
+  function renderCell(key: string, value: unknown) {
     if (value === null || value === undefined || value === "") return <span key={key} className="rv-cell rv-cell--empty">—</span>;
     // Highlight passport number
     if (key === "passport_number") return <code key={key} className="rv-cell rv-cell--highlight">{String(value)}</code>;
@@ -92,18 +194,41 @@ export default function ResultVerificationPage() {
                 autoComplete="off"
               />
             </div>
-            <div className="rv-field">
-              <label htmlFor="rv-occ">Occupation Key</label>
+            <div className="rv-field" ref={occupationBoxRef} style={{ position: "relative" }}>
+              <label htmlFor="rv-occ">Occupation</label>
               <input
                 id="rv-occ"
                 type="text"
-                value={occupationKey}
-                onChange={(e) => setOccupationKey(e.target.value)}
-                placeholder="e.g. 933301"
-                required
+                value={occupationQuery}
+                onChange={(e) => {
+                  setOccupationQuery(e.target.value);
+                  setOccupationKey("");
+                  setOccupationOpen(true);
+                }}
+                onFocus={() => { if (occupationOptions.length > 0) setOccupationOpen(true); }}
+                placeholder="Type to search, e.g. Welder"
                 autoComplete="off"
+                required
               />
-              {occupationKey && <small>Pre-filled from your login page selection.</small>}
+              {occupationOpen && occupationQuery.trim().length >= 2 && (
+                <div className="rv-occ-dropdown">
+                  {occupationLoading && <div className="rv-occ-dropdown-item rv-occ-dropdown-item--muted">Searching…</div>}
+                  {!occupationLoading && occupationError && <div className="rv-occ-dropdown-item rv-occ-dropdown-item--muted">{occupationError}</div>}
+                  {!occupationLoading && !occupationError && occupationOptions.length === 0 && (
+                    <div className="rv-occ-dropdown-item rv-occ-dropdown-item--muted">No occupations found.</div>
+                  )}
+                  {!occupationLoading && occupationOptions.map((opt) => (
+                    <button type="button" key={opt.id} className="rv-occ-dropdown-item" onClick={() => selectOccupation(opt)}>
+                      {opt.name} <span className="rv-occ-dropdown-item-id">#{opt.id}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {occupationKey ? (
+                <small>Selected occupation key: {occupationKey}</small>
+              ) : (
+                <small>Search and select an occupation from the list.</small>
+              )}
             </div>
             <div className="rv-field">
               <label htmlFor="rv-nat">Nationality ID</label>
@@ -140,7 +265,7 @@ export default function ResultVerificationPage() {
                 <tbody>
                   {results.map((row, i) => (
                     <tr key={i}>
-                      {Object.entries(row).map(([key, value]) => renderCell(key, value, row, i))}
+                      {Object.entries(row).map(([key, value]) => renderCell(key, value))}
                     </tr>
                   ))}
                 </tbody>

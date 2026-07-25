@@ -178,3 +178,43 @@
   color: #6b789e;
   font-size: 12px;
 }
+.rv-occ-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #14192b;
+  border: 1px solid rgba(240, 200, 105, 0.25);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+}
+.rv-occ-dropdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #eef1fb;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.rv-occ-dropdown-item:hover { background: rgba(240, 200, 105, 0.1); }
+.rv-occ-dropdown-item--muted {
+  color: #6b789e;
+  cursor: default;
+}
+.rv-occ-dropdown-item--muted:hover { background: transparent; }
+.rv-occ-dropdown-item-id {
+  color: #6b789e;
+  font-size: 11px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}

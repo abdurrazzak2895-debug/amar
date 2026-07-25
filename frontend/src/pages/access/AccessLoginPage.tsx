@@ -27,7 +27,14 @@ export default function AccessLoginPage() {
     setLoading(true);
     setMsg("");
     try {
-      await login(email, password);
+      const user = await login(email, password);
+      if (user.role === "ADMIN" || user.role === "AGENCY") {
+        setMsg("Login successful. Redirecting to dashboard…");
+        setMsgType("ok");
+        navigate("/access/dashboard");
+        return;
+      }
+
       sessionStorage.setItem("portal_login", email);
       setMsg("Login successful. Redirecting to SVP verification…");
       setMsgType("ok");

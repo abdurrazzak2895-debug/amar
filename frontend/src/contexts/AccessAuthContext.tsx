@@ -27,7 +27,7 @@ interface AccessAuthContextType {
   user: AccessUser | null;
   loading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AccessUser>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
 }
@@ -117,13 +117,14 @@ export function AccessAuthProvider({ children }: { children: React.ReactNode }) 
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await accessAuthApi("/login", { email, password });
+  const login = useCallback(async (email: string, password: string): Promise<AccessUser> => {
+    const res = await accessAuthApi<{ accessToken: string; user: AccessUser }>("/login", { email, password });
     saveAccessToken(res.accessToken);
     saveAccessUser(res.user);
     localStorage.setItem("access_login_time", String(Date.now()));
     setUser(res.user);
     startSessionTimer();
+    return res.user;
   }, [startSessionTimer]);
 
   const logout = useCallback(() => {

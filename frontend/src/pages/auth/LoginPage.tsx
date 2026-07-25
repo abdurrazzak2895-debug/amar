@@ -71,7 +71,7 @@ export default function LoginPage() {
     setOccError("");
     try {
       const qs = encodeURIComponent(query.trim());
-      const data = await apiAuthGet<any>(`/registration/occupations?per_page=1000&name=contains::${qs}`);
+      const data = await apiAuthGet<any>(`/registration/occupations?per_page=1000&name=${qs}`);
       const list = Array.isArray(data) ? data : (data?.data ?? data?.occupations ?? []);
       setOccResults(list);
     } catch (err: any) {

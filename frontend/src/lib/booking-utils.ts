@@ -129,6 +129,12 @@ export function getSessionCategoryId(item: any): string {
     item?.category?.id ||
     item?.occupation?.category_id ||
     item?.occupation?.category?.id ||
+    // Confirmed from live SVP /exam_sessions responses: the occupation object's
+    // own `id` IS the category identifier (e.g. occupation.id === 159, matching
+    // the category_id used everywhere else in this app) — there is no separate
+    // occupation.category_id field in the real payload. Without this fallback,
+    // admin section rules that filter by category_id never match anything.
+    item?.occupation?.id ||
     ""
   ).trim();
 }
