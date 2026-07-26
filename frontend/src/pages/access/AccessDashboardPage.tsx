@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Activity, Building2, CircleUserRound, Database, FileSliders,
-  LayoutDashboard, LogOut, Plus, SearchCheck, Server, ShieldCheck, Users, WalletCards,
+  LayoutDashboard, LogOut, Megaphone, Plus, SearchCheck, Server, ShieldCheck, Users, WalletCards,
 } from "lucide-react";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
 import { accessAdminApi, accessAgencyApi } from "@/lib/access-api";
@@ -104,6 +104,7 @@ export default function AccessDashboardPage() {
             <small>ACCESS CONTROL</small>
             <Link className="ap-nav__link" to="/access/accounts"><Users />All Accounts</Link>
             <Link className="ap-nav__link" to="/access/finance"><WalletCards />Permissions & Wallets</Link>
+            <Link className="ap-nav__link" to="/access/notice"><Megaphone />Notice</Link>
             <Link className="ap-nav__link" to="/access/agencies"><Building2 />Create Agency</Link>
             <Link className="ap-nav__link" to="/access/users"><CircleUserRound />Create Users</Link>
             <small>INFRASTRUCTURE</small>

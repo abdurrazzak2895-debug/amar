@@ -610,6 +610,30 @@ serve(async (req) => {
       });
     }
 
+    // GET/PUT /notice — the single dashboard-wide announcement banner shown
+    // to every logged-in user. Admin can toggle it on/off and edit the text.
+    if (path === "/notice" && (req.method === "GET" || req.method === "PUT")) {
+      if (req.method === "GET") {
+        const { data } = await supabase.from("access_dashboard_notice").select("enabled,message,updated_at").eq("singleton", true).single();
+        return new Response(JSON.stringify({ notice: data || { enabled: false, message: "" } }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const body = await req.json().catch(() => ({}));
+      const enabled = Boolean(body.enabled);
+      const message = String(body.message || "").slice(0, 2000);
+      const { data, error } = await supabase.from("access_dashboard_notice")
+        .update({ enabled, message, updated_by: auth.sub, updated_at: new Date().toISOString() })
+        .eq("singleton", true).select("enabled,message,updated_at").single();
+      if (error) throw error;
+      await supabase.from("access_audit_log").insert({
+        actor_account_id: auth.sub, action: "dashboard_notice.updated", details: { enabled, message },
+      });
+      return new Response(JSON.stringify({ notice: data }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // POST /accounts/:id/wallet-adjustments
     const walletMatch = path.match(/^\/accounts\/([^/]+)\/wallet-adjustments$/);
     if (walletMatch && req.method === "POST") {

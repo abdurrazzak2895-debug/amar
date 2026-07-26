@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CreditCard, LayoutDashboard, LogOut, ShieldCheck, Users, WalletCards } from "lucide-react";
+import { CreditCard, LayoutDashboard, LogOut, Megaphone, ShieldCheck, Users, WalletCards } from "lucide-react";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
 import { accessAdminApi } from "@/lib/access-api";
 import "@/styles/access-dashboard-premium.css";
@@ -143,7 +143,7 @@ export default function AccessFinancePage() {
     finally { setSavingBookingCost(false); }
   }
 
-  return <div className="ap-shell"><aside className="ap-sidebar"><div className="ap-brand"><span className="ap-brand__mark">A</span><div><strong>Access</strong><small>ADMIN CONSOLE</small></div></div><nav className="ap-nav"><small>CONTROL</small><Link className="ap-nav__link" to="/access/dashboard"><LayoutDashboard />Dashboard</Link><Link className="ap-nav__link" to="/access/accounts"><Users />Accounts</Link><Link className="ap-nav__link ap-nav__link--active" to="/access/finance"><WalletCards />Permissions & Wallets</Link></nav><div className="ap-sidebar__foot">Secure ledger · v1</div></aside>
+  return <div className="ap-shell"><aside className="ap-sidebar"><div className="ap-brand"><span className="ap-brand__mark">A</span><div><strong>Access</strong><small>ADMIN CONSOLE</small></div></div><nav className="ap-nav"><small>CONTROL</small><Link className="ap-nav__link" to="/access/dashboard"><LayoutDashboard />Dashboard</Link><Link className="ap-nav__link" to="/access/accounts"><Users />Accounts</Link><Link className="ap-nav__link ap-nav__link--active" to="/access/finance"><WalletCards />Permissions & Wallets</Link><Link className="ap-nav__link" to="/access/notice"><Megaphone />Notice</Link></nav><div className="ap-sidebar__foot">Secure ledger · v1</div></aside>
     <main className="ap-main"><header className="ap-topbar"><div><small>ACCESS POLICIES</small><strong>Permissions, deposits and credit ledger</strong></div><div className="ap-account"><span className="ap-role ap-role--admin">ADMIN</span><div><strong>{user?.name}</strong><small>{user?.email}</small></div><button onClick={() => { logout(); navigate("/access/login"); }}><LogOut />Logout</button></div></header>
       <section className="af-head"><ShieldCheck /><div><small>SECURITY & FINANCE</small><h1>Account controls</h1><p>Only explicitly enabled capabilities are available to managed accounts.</p></div></section>
       {message && <div className="ap-error af-message">{message}</div>}

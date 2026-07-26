@@ -19,6 +19,7 @@ import AccessLoginPage from "@/pages/access/AccessLoginPage";
 import AccessRegisterPage from "@/pages/access/AccessRegisterPage";
 import AccessForbiddenPage from "@/pages/access/AccessForbiddenPage";
 import AccessFinancePage from "@/pages/access/AccessFinancePage";
+import AccessNoticePage from "@/pages/access/AccessNoticePage";
 import WalletPage from "@/pages/WalletPage";
 import ForgotPasswordPage from "@/pages/access/ForgotPasswordPage";
 import AccessDashboardPage from "@/pages/access/AccessDashboardPage";
@@ -66,6 +67,7 @@ const App = () => (
               <Route path="/access/accounts" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessAccountsPage /></AccessProtectedRoute>} />
               <Route path="/access/users" element={<AccessProtectedRoute allowedRoles={["ADMIN", "AGENCY"]} requiredPermission="users.create"><AccessUsersPage /></AccessProtectedRoute>} />
               <Route path="/access/finance" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessFinancePage /></AccessProtectedRoute>} />
+              <Route path="/access/notice" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessNoticePage /></AccessProtectedRoute>} />
               <Route path="/access/agencies" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessAgenciesPage /></AccessProtectedRoute>} />
               <Route path="/access/session-centers" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessSessionCentersPage /></AccessProtectedRoute>} />
               <Route path="/access/test-centers" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessTestCentersPage /></AccessProtectedRoute>} />
