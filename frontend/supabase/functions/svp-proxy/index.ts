@@ -69,35 +69,6 @@ async function requireAccessPermission(req: Request, permissionKey: string) {
   return { supabase, account };
 }
 
-// Role-based gate (independent of the account_permissions checkbox table
-// used by requireAccessPermission above). An admin assigns a dedicated
-// role — e.g. accounts.special_role = 'SESSION_LOOKUP' — directly to a
-// managed USER account; having that role alone is sufficient, no separate
-// permission toggle needed.
-async function requireSpecialRole(req: Request, roleName: string) {
-  const token = req.headers.get("x-access-token")?.trim();
-  if (!token) throw { statusCode: 401, message: "Access Portal login is required" };
-  let payload: { sub?: string };
-  try {
-    payload = await verify(token, await getAccessJwtKey()) as { sub?: string };
-  } catch {
-    throw { statusCode: 401, message: "Access Portal session expired" };
-  }
-  const supabase = getSupabase();
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id,role,status,special_role,agency_id")
-    .eq("id", payload.sub || "")
-    .single();
-  if (!account || account.status !== "ACTIVE" || account.role !== "USER") {
-    throw { statusCode: 403, message: "Active candidate account is required" };
-  }
-  if (account.special_role !== roleName) {
-    throw { statusCode: 403, message: `${roleName} role is required` };
-  }
-  return { supabase, account };
-}
-
 async function getBookingCreditCost(supabase: ReturnType<typeof getSupabase>, agencyId?: string | null): Promise<number> {
   if (agencyId) {
     const { data: agencySettings, error: agencyError } = await supabase
@@ -637,16 +608,7 @@ Deno.serve(async (req) => {
         (req.method === "GET" && /^\/exam-reservations(?:\/[^/]+)?$/.test(path)) ||
         (req.method === "DELETE" && /^\/exam-reservations\/[^/]+$/.test(path)) ||
         isBookingReschedule;
-      // Looking up a single exam session by its numeric session number returns the
-      // live encrypted exam_session_id token (usable for /temporary-seats holds),
-      // so it's gated behind a dedicated role — admin must assign the
-      // "SESSION_LOOKUP" special_role to an account for it to work here.
-      const isSessionLookup =
-        req.method === "GET" && /^\/exam-sessions?\/[^/]+$/.test(path);
-      let accessContext:
-        | Awaited<ReturnType<typeof requireAccessPermission>>
-        | Awaited<ReturnType<typeof requireSpecialRole>>
-        | null = null;
+      let accessContext: Awaited<ReturnType<typeof requireAccessPermission>> | null = null;
       let walletHoldId = "";
       let bookingCreditCost = 0;
 
@@ -656,8 +618,6 @@ Deno.serve(async (req) => {
         accessContext = await requireAccessPermission(req, "booking.create");
       } else if (isPaymentCreate) {
         accessContext = await requireAccessPermission(req, "payment.create");
-      } else if (isSessionLookup) {
-        accessContext = await requireSpecialRole(req, "SESSION_LOOKUP");
       }
 
       if (isChargeableBooking && accessContext?.account.permission_mode === "MANAGED") {
