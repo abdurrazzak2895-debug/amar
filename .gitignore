@@ -116,3 +116,4 @@ credentials.json
 
 # Supabase CLI local cache
 frontend/supabase/.temp/
+supabase/.temp/
