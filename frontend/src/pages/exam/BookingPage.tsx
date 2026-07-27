@@ -155,6 +155,14 @@ export default function BookingPage() {
       const mapped = testCenterMap.get(key);
       if (mapped) return mapped;
     }
+    // SVP gave no name and the local DB has no mapping for this site — fall back
+    // to the live t2hub center list (already fetched for the selected city),
+    // matched by site id.
+    const siteId = String(getSessionSiteId(item));
+    if (siteId) {
+      const fromT2hub = cityCenterOptions.find((option) => String(option.siteId) === siteId);
+      if (fromT2hub?.name) return fromT2hub.name;
+    }
     return getSessionCenterName(item);
   };
   const filteredSessions = useMemo(
