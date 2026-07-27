@@ -131,12 +131,18 @@ Deno.serve(async (req) => {
 
     if (path === "/me" && req.method === "GET") {
       const billingSettings = await resolveBillingSettings(supabase, account);
-      const [{ data: wallet }, { data: transactions }, { data: deposits }] = await Promise.all([
+      const [{ data: wallet }, { data: transactions }, { data: deposits }, { data: notice }] = await Promise.all([
         supabase.from("wallets").select("balance,currency,updated_at").eq("account_id", account.id).single(),
         supabase.from("wallet_transactions").select("*").eq("account_id", account.id).order("created_at", { ascending: false }).limit(100),
         supabase.from("deposit_requests").select("*").eq("account_id", account.id).order("created_at", { ascending: false }).limit(50),
+        supabase.from("access_dashboard_notice").select("enabled,message").eq("singleton", true).single(),
       ]);
-      return json({ account, permissions, billingSettings, wallet: wallet || { balance: 0, currency: "CREDIT" }, transactions: transactions || [], deposits: deposits || [] });
+      return json({
+        account, permissions, billingSettings,
+        wallet: wallet || { balance: 0, currency: "CREDIT" },
+        transactions: transactions || [], deposits: deposits || [],
+        notice: notice || { enabled: false, message: "" },
+      });
     }
 
     if (path === "/deposits" && req.method === "POST") {

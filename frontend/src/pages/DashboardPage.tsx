@@ -47,6 +47,7 @@ interface DashboardWalletData {
   wallet: { balance: number | string; currency: string };
   transactions: DashboardWalletTransaction[];
   deposits: DashboardDepositRequest[];
+  notice?: { enabled: boolean; message: string } | null;
 }
 
 function decodeJwtPayload(token: string) {
@@ -289,6 +290,24 @@ export default function DashboardPage() {
         </section>
 
         {error ? <div className="dp-error">{error}</div> : null}
+
+        {walletData?.notice?.enabled && walletData.notice.message ? (
+          <div
+            style={{
+              background: "#fff4e0",
+              border: "1px solid #f0c674",
+              borderRadius: 10,
+              padding: "14px 18px",
+              margin: "0 0 20px",
+              color: "#5a4200",
+              fontSize: 14.5,
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {walletData.notice.message}
+          </div>
+        ) : null}
 
         <section className="dp-panel dp-account-panel">
           <div className="dp-panel-head">

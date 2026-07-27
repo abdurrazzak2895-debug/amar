@@ -179,7 +179,6 @@ function publicAccount(a: any) {
     id: a.id, name: a.name, email: a.email, phone: a.phone, role: a.role, status: a.status,
     agency_id: a.agency_id, created_by_id: a.created_by_id,
     permission_mode: a.permission_mode || "LEGACY", self_registered: Boolean(a.self_registered),
-    special_role: a.special_role || null,
     created_at: a.created_at, updated_at: a.updated_at,
   };
 }
@@ -573,39 +572,26 @@ serve(async (req) => {
       });
     }
 
-    // PUT /accounts/:id/special-role — assign or clear a dedicated role
-    // (currently just SESSION_LOOKUP) independent of the booking/payment
-    // permission checkboxes above. Assigning this role alone is enough
-    // for the account to use the numeric exam-session lookup endpoint.
-    const specialRoleMatch = path.match(/^\/accounts\/([^/]+)\/special-role$/);
-    if (specialRoleMatch && req.method === "PUT") {
-      const accountId = specialRoleMatch[1];
+    // GET/PUT /notice — the single dashboard-wide announcement banner shown
+    // to every logged-in user. Admin can toggle it on/off and edit the text.
+    if (path === "/notice" && (req.method === "GET" || req.method === "PUT")) {
+      if (req.method === "GET") {
+        const { data } = await supabase.from("access_dashboard_notice").select("enabled,message,updated_at").eq("singleton", true).single();
+        return new Response(JSON.stringify({ notice: data || { enabled: false, message: "" } }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       const body = await req.json().catch(() => ({}));
-      const requested = body.specialRole === null || body.specialRole === undefined
-        ? null
-        : String(body.specialRole).trim().toUpperCase();
-      const ALLOWED_SPECIAL_ROLES = ["SESSION_LOOKUP"];
-      if (requested !== null && !ALLOWED_SPECIAL_ROLES.includes(requested)) {
-        return new Response(JSON.stringify({ message: `specialRole must be one of: ${ALLOWED_SPECIAL_ROLES.join(", ")}, or null` }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: target } = await supabase.from("accounts").select("id,role").eq("id", accountId).single();
-      if (!target) return new Response(JSON.stringify({ message: "Account not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (target.role !== "USER") {
-        return new Response(JSON.stringify({ message: "Only USER accounts can be assigned a special role" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { error } = await supabase.from("accounts").update({ special_role: requested }).eq("id", accountId);
+      const enabled = Boolean(body.enabled);
+      const message = String(body.message || "").slice(0, 2000);
+      const { data, error } = await supabase.from("access_dashboard_notice")
+        .update({ enabled, message, updated_by: auth.sub, updated_at: new Date().toISOString() })
+        .eq("singleton", true).select("enabled,message,updated_at").single();
       if (error) throw error;
       await supabase.from("access_audit_log").insert({
-        actor_account_id: auth.sub, target_account_id: accountId,
-        action: "special_role.updated", details: { special_role: requested },
+        actor_account_id: auth.sub, action: "dashboard_notice.updated", details: { enabled, message },
       });
-      return new Response(JSON.stringify({ message: "Role updated", special_role: requested }), {
+      return new Response(JSON.stringify({ notice: data }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

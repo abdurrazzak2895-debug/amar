@@ -3,8 +3,19 @@ import { useEffect, useState } from "react";
 import { api, getSession, getBackendUrl, getProxyPrefix } from "@/lib/api";
 import "@/styles/reservations-premium.css";
 
+// Confirmed from live traffic: SVP's /exam_reservations list endpoint returns
+// a flat single-object shape (top-level reservation_id, final_result, labor,
+// occupation, test_center, etc. — no array wrapper at all) when the account
+// has exactly one reservation, instead of an array with one item. Without
+// this check, that single reservation would silently disappear.
+const RESERVATION_FIELD_HINTS = ["reservation_id", "reservation_status", "final_result", "labor", "test_center", "prometric_data"];
+function looksLikeSingleReservation(obj: any): boolean {
+  return obj && typeof obj === "object" && !Array.isArray(obj) && RESERVATION_FIELD_HINTS.some((key) => key in obj);
+}
+
 function pickArray(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
+  if (looksLikeSingleReservation(payload)) return [payload];
   const candidates = [
     payload?.data, payload?.items, payload?.result, payload?.payload,
     payload?.exam_reservations, payload?.reservations,
@@ -13,7 +24,10 @@ function pickArray(payload: any): any[] {
     payload?.result?.items, payload?.result?.exam_reservations,
     payload?.payload?.items, payload?.payload?.exam_reservations,
   ];
-  for (const item of candidates) { if (Array.isArray(item)) return item; }
+  for (const item of candidates) {
+    if (Array.isArray(item)) return item;
+    if (looksLikeSingleReservation(item)) return [item];
+  }
   return [];
 }
 
