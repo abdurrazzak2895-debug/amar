@@ -163,6 +163,19 @@ export default function BookingPage() {
       const fromT2hub = cityCenterOptions.find((option) => String(option.siteId) === siteId);
       if (fromT2hub?.name) return fromT2hub.name;
     }
+    // SVP frequently supplies no site_id at all (its exam_session.test_center
+    // is often just {city, country_code, country_id}) — nothing to match by
+    // id. If t2hub reports exactly one center for this session's city, it's
+    // unambiguous, so it's safe to show without a matching id. With more than
+    // one candidate we can't guess which one is right, so skip it rather than
+    // risk showing the wrong center.
+    if (!siteId) {
+      const sessionCity = getSessionSiteCity(item).trim().toLowerCase();
+      const cityMatches = sessionCity
+        ? cityCenterOptions.filter((option) => String(option.city).trim().toLowerCase() === sessionCity)
+        : cityCenterOptions;
+      if (cityMatches.length === 1 && cityMatches[0].name) return cityMatches[0].name;
+    }
     return getSessionCenterName(item);
   };
   const filteredSessions = useMemo(
