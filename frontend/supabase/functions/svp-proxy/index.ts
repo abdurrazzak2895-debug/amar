@@ -186,6 +186,10 @@ function extractT2HubKey(html: string): string {
   return html.match(/window\.__sk\s*=\s*['"]([^'"]+)['"]/)?.[1] || "";
 }
 
+function extractT2HubCsrf(html: string): string {
+  return html.match(/<meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/)?.[1] || "";
+}
+
 async function fetchT2HubSessionPage(appPath: string) {
   const res = await fetch(`${T2HUB_BASE}${appPath}`, {
     headers: {
@@ -203,12 +207,13 @@ async function getT2HubSession() {
   const appPaths = [T2HUB_APP_PATH, `${T2HUB_APP_PATH}/`, `${T2HUB_APP_PATH}/agent/login`];
   let lastStatus = 0;
   for (const appPath of appPaths) {
-    const { res, keyRaw } = await fetchT2HubSessionPage(appPath);
+    const { res, html, keyRaw } = await fetchT2HubSessionPage(appPath);
     lastStatus = res.status;
     if (!res.ok || !keyRaw) continue;
 
     t2hubSession = {
       keyRaw,
+      csrfToken: extractT2HubCsrf(html),
       cookie: extractT2HubCookie(res.headers),
       appPath,
       expiresAt: Date.now() + 10 * 60 * 1000,
@@ -255,6 +260,35 @@ async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSes
   return data;
 }
 
+async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNullable<typeof t2hubSession>) {
+  const res = await fetch(`${T2HUB_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json, */*",
+      "Content-Type": "application/json",
+      Referer: `${T2HUB_BASE}${session.appPath}`,
+      "User-Agent": SVP_UA,
+      // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected —
+      // POSTing without a matching X-CSRF-TOKEN (bound to the session cookie)
+      // fails with 419. GET endpoints don't need this.
+      ...(session.csrfToken ? { "X-CSRF-TOKEN": session.csrfToken } : {}),
+      ...(session.cookie ? { Cookie: session.cookie } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+  if (!res.ok) {
+    throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
+  }
+  return data;
+}
+
 async function t2hubFetch(path: string) {
   const session = await getT2HubSession();
   const data = await fetchT2HubJson(path, session);
@@ -265,6 +299,20 @@ async function t2hubFetch(path: string) {
     t2hubSession = null;
     const fresh = await getT2HubSession();
     const freshData = await fetchT2HubJson(path, fresh);
+    return await decryptT2HubEnvelope(freshData, fresh.keyRaw);
+  }
+}
+
+async function t2hubPost(path: string, body: unknown) {
+  const session = await getT2HubSession();
+  const data = await fetchT2HubJsonPost(path, body, session);
+
+  try {
+    return await decryptT2HubEnvelope(data, session.keyRaw);
+  } catch {
+    t2hubSession = null;
+    const fresh = await getT2HubSession();
+    const freshData = await fetchT2HubJsonPost(path, body, fresh);
     return await decryptT2HubEnvelope(freshData, fresh.keyRaw);
   }
 }
@@ -498,6 +546,20 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && path === "/t2hub/exam-sessions-bulk") {
       return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query))));
+    }
+
+    // ── t2hub bulk exam sessions (CSRF-protected POST) ─────────
+    // Batches multiple {category_id, city, exam_date, center_token, center}
+    // lookups into a single request — more efficient than repeated single-city
+    // calls to /pacc-exam-sessions when checking several centers/dates at once.
+    if (req.method === "POST" && path === "/t2hub/exam-sessions-bulk") {
+      const body = await req.json().catch(() => ({}));
+      const requests = body?.requests;
+      if (!Array.isArray(requests) || !requests.length) {
+        throw { statusCode: 400, message: "Missing requests array" };
+      }
+      const data = await t2hubPost(`${T2HUB_APP_PATH}/api/exam-sessions-bulk`, { requests });
+      return json(data);
     }
 
     // ── t2hub city-wide PACC sessions ────────────────────────
