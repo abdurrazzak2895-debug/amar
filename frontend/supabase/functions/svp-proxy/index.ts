@@ -474,8 +474,30 @@ Deno.serve(async (req) => {
           const data = await svpFetch(buildPath(paths[i], query), { method: "GET", token: svpToken });
           return json(data);
         } catch (err: any) {
-          if (err?.statusCode !== 404 || i === paths.length - 1) throw err;
+          if (err?.statusCode !== 404) throw err;
         }
+      }
+
+      // The official SVP date routes are not consistently available. Use the
+      // corresponding t2hub calendar endpoint when all of them return 404.
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", params)));
+    }
+
+    // Keep the existing `/occupations` client contract, while using t2hub's
+    // PACC list when the equivalent SVP route has been removed upstream.
+    if (req.method === "GET" && path === "/occupations") {
+      try {
+        return json(await svpFetch(
+          buildPath("/api/v1/individual_labor_space/occupations", query),
+          { method: "GET", token: svpToken },
+        ));
+      } catch (err: any) {
+        if (err?.statusCode !== 404) throw err;
+        const params = new URLSearchParams(query);
+        params.delete("locale");
+        return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params)));
       }
     }
 
@@ -483,10 +505,28 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/t2hub/test-centers") {
       const params = new URLSearchParams(query);
       params.delete("locale");
-      const city = params.get("city") || "";
-      if (!city) throw { statusCode: 400, message: "Missing city" };
+      // t2hub names this filter `division`, while the booking UI uses `city`.
+      // Convert at the boundary so callers can consistently use `city`.
+      const city = params.get("city") || params.get("division") || "";
+      if (!city) throw { statusCode: 400, message: "Missing city or division" };
+      params.delete("city");
+      params.set("division", city);
       const data = await t2hubFetch(t2hubQuery("/test-centers", params));
       return json(data);
+    }
+
+    // These routes are intentionally proxied: t2hub responses are encrypted
+    // (`x-encrypted: 1`) and browser callers are subject to cross-origin rules.
+    if (req.method === "GET" && path === "/t2hub/occupations") {
+      return json(await t2hubFetch(t2hubQuery("/pacc/occupations", new URLSearchParams(query))));
+    }
+
+    if (req.method === "GET" && path === "/t2hub/exam-available-dates") {
+      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", new URLSearchParams(query))));
+    }
+
+    if (req.method === "GET" && path === "/t2hub/exam-sessions-bulk") {
+      return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query))));
     }
 
     // ── t2hub city-wide PACC sessions ────────────────────────
@@ -501,8 +541,8 @@ Deno.serve(async (req) => {
       }
 
       const [centersData, sessionsData] = await Promise.all([
-        t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ city }))),
-        t2hubFetch(t2hubQuery("/pacc-exam-sessions", params)),
+        t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city }))),
+        t2hubFetch(t2hubQuery("/exam-sessions-bulk", params)),
       ]);
       const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
       const centerByName = new Map(
@@ -524,8 +564,8 @@ Deno.serve(async (req) => {
         try {
           sessionParams.delete("locale");
           const [centersData, sessionsData] = await Promise.all([
-            t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ city }))),
-            t2hubFetch(t2hubQuery("/pacc-exam-sessions", sessionParams)),
+            t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city }))),
+            t2hubFetch(t2hubQuery("/exam-sessions-bulk", sessionParams)),
           ]);
           const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
           const centerByName = new Map(
