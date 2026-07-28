@@ -630,6 +630,42 @@ export default function BookingPage() {
     if (selectedCity) setStatus(`City selected: ${selectedCity}. Loading sessions for the selected date.`);
   }, [selectedCity]);
 
+  // Load session-center mappings to populate test centers dropdown
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const mappings: any = await api(`/session-centers`);
+        if (!active) return;
+        const maps = pickArray(mappings);
+        if (!maps.length) return;
+        // Build a map from session_id → { site_id, center_name }
+        const sessionToCenterMap = new Map<string, { site_id: string; name: string }>();
+        maps.forEach((map: any) => {
+          const sesId = map?.exam_session_id || map?.id;
+          const siteId = map?.site_id;
+          const name = map?.center_name || map?.name;
+          if (sesId && siteId) {
+            sessionToCenterMap.set(String(sesId), { site_id: String(siteId), name: String(name || `Site #${siteId}`) });
+          }
+        });
+        // Inject center details into sessions
+        setSessions(prevSessions => 
+          prevSessions.map((s: any) => {
+            const sesId = getSessionId(s);
+            const mapping = sessionToCenterMap.get(String(sesId));
+            return mapping ? { ...s, site_id: mapping.site_id, test_center_name: mapping.name } : s;
+          })
+        );
+      } catch (err: any) {
+        // Silently fail - session-centers might not be available
+        console.warn("Could not load session-center mappings:", err?.message);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  // Load test centers from database
   useEffect(() => {
     let active = true;
     (async () => {
@@ -735,23 +771,32 @@ export default function BookingPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
+      if (!selectedCity || !availableDate || !categoryId) { setSessions([]); return; }
       setLoadingSessions(true); setError("");
       try {
         const params = new URLSearchParams({ 
           category_id: String(categoryId), 
           city: String(selectedCity), 
-          test_center_id: String(selectedCenterId),
           test_date: availableDate, 
           locale: "en" 
         });
         const data: any = await api(`/exam-sessions?${params.toString()}`);
-        if (!active) return; setSessions(pickArray(data));
+        if (!active) return;
+        const sessions = pickArray(data);
+        // Filter by selected center if provided (but don't require it for initial load)
+        const filtered = selectedCenterId
+          ? sessions.filter((s: any) => {
+              const sid = getSessionSiteId(s);
+              return String(sid) === String(selectedCenterId) || 
+                     (testCenterMap.get(sid) && String(testCenterMap.get(sid)) === String(selectedCenterId));
+            })
+          : sessions;
+        if (!active) return; setSessions(filtered);
       } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load test sessions"); }
       finally { if (active) setLoadingSessions(false); }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId, selectedCenterId]);
+  }, [selectedCity, availableDate, categoryId]);
 
   // Admin-defined exam_session_id -> site_id mapping (deterministic).
   // Loaded from Lovable Cloud whenever sessions change. Also fetches the
