@@ -747,10 +747,16 @@ export default function BookingPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!selectedCity || !availableDate || !categoryId) { setSessions([]); return; }
+      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
       setLoadingSessions(true); setError("");
       try {
-        const params = new URLSearchParams({ category_id: String(categoryId), city: String(selectedCity), exam_date: availableDate, locale: "en" });
+        const params = new URLSearchParams({ 
+          category_id: String(categoryId), 
+          city: String(selectedCity), 
+          test_center_id: String(selectedCenterId),
+          test_date: availableDate, 
+          locale: "en" 
+        });
         let data: any;
         try {
           data = await api(`/t2hub/pacc-exam-sessions?${params.toString()}`);
@@ -762,7 +768,7 @@ export default function BookingPage() {
       finally { if (active) setLoadingSessions(false); }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId]);
+  }, [selectedCity, availableDate, categoryId, selectedCenterId]);
 
   // Admin-defined exam_session_id -> site_id mapping (deterministic).
   // Loaded from Lovable Cloud whenever sessions change. Also fetches the
