@@ -36,7 +36,7 @@ const AccessAuthContext = createContext<AccessAuthContextType>({
   user: null,
   loading: true,
   isAuthenticated: false,
-  login: async () => {},
+  login: async () => ({} as AccessUser),
   logout: () => {},
   hasPermission: () => false,
 });
