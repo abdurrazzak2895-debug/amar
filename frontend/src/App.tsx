@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AccessAuthProvider } from "@/contexts/AccessAuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AccessProtectedRoute from "@/components/AccessProtectedRoute";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import LoginPage from "@/pages/auth/LoginPage";
 import OtpPage from "@/pages/auth/OtpPage";
 import RegisterPage from "@/pages/auth/RegisterPage";
@@ -43,6 +44,7 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          <SpeedInsights />
           <BrowserRouter>
             <Routes>
               {/* SVP Auth */}
