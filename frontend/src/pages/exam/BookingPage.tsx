@@ -635,17 +635,6 @@ export default function BookingPage() {
     (async () => {
       if (!selectedCity) { setCityCenterOptions([]); return; }
       const fallbackRows = fallbackCentersForCity(selectedCity);
-      let t2hubRows: { siteId: string; name: string; city: string }[] = [];
-      try {
-        const live = await api(`/t2hub/test-centers?city=${encodeURIComponent(selectedCity)}&locale=en`);
-        t2hubRows = (Array.isArray(live?.sites) ? live.sites : []).map((row: any) => ({
-          siteId: String(row.id || row.center || ""),
-          name: String(row.name || row.city || `Site #${row.id || row.center || ""}`),
-          city: String(row.raw_city || row.division || selectedCity),
-        })).filter((row) => row.siteId && row.name);
-      } catch {
-        t2hubRows = [];
-      }
       const { data } = await supabase
         .from("test_centers")
         .select("site_id, name, city")
@@ -654,7 +643,6 @@ export default function BookingPage() {
       if (!active) return;
       const merged = new Map<string, { siteId: string; name: string; city: string }>();
       fallbackRows.forEach((row) => merged.set(row.siteId, row));
-      t2hubRows.forEach((row) => merged.set(row.siteId, row));
       (data || []).forEach((row: any) => {
         const siteId = String(row.site_id);
         merged.set(siteId, {
@@ -757,12 +745,7 @@ export default function BookingPage() {
           test_date: availableDate, 
           locale: "en" 
         });
-        let data: any;
-        try {
-          data = await api(`/t2hub/pacc-exam-sessions?${params.toString()}`);
-        } catch {
-          data = await api(`/exam-sessions?${params.toString()}`);
-        }
+        const data: any = await api(`/exam-sessions?${params.toString()}`);
         if (!active) return; setSessions(pickArray(data));
       } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load test sessions"); }
       finally { if (active) setLoadingSessions(false); }
