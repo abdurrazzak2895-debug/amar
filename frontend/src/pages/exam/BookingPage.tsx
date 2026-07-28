@@ -532,6 +532,10 @@ export default function BookingPage() {
     const dateTimeRaw = getSessionDateTimeRaw(item);
     const timezoneOffset = String(item?.tc_time_zone_offset || item?.exam_session?.tc_time_zone_offset || "").trim();
     if (dateTimeRaw) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateTimeRaw)) {
+        const [year, month, day] = dateTimeRaw.split("-");
+        return `${month}/${day}/${year}`;
+      }
       const normalizedDateTime = dateTimeRaw.replace(" ", "T");
       const parsed = new Date(normalizedDateTime);
       if (!Number.isNaN(parsed.getTime())) {
@@ -783,15 +787,10 @@ export default function BookingPage() {
         const data: any = await api(`/exam-sessions?${params.toString()}`);
         if (!active) return;
         const sessions = pickArray(data);
-        // Filter by selected center if provided (but don't require it for initial load)
-        const filtered = selectedCenterId
-          ? sessions.filter((s: any) => {
-              const sid = getSessionSiteId(s);
-              return String(sid) === String(selectedCenterId) || 
-                     (testCenterMap.get(sid) && String(testCenterMap.get(sid)) === String(selectedCenterId));
-            })
-          : sessions;
-        if (!active) return; setSessions(filtered);
+        // Do not pre-filter session list by selectedCenterId here.
+        // The selected center is applied later via filteredSessions so that
+        // changing the selection still works without reloading the raw session list.
+        setSessions(sessions);
       } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load test sessions"); }
       finally { if (active) setLoadingSessions(false); }
     })();

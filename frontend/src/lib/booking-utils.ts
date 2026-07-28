@@ -357,6 +357,10 @@ export function extractId(payload: any, keys: string[]): string {
 
 export function formatDateLabel(value: string): string {
   if (!value) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${month}/${day}/${year}`;
+  }
   const parsed = new Date(value);
   if (isNaN(parsed.getTime())) return value;
   return parsed.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
