@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { api } from "@/lib/api";
+import { getSessionSiteId, getSessionSiteCity, getExplicitSessionCenterName } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 
 interface ExamCategory {
@@ -22,6 +23,10 @@ interface TestCenter {
   city: string;
   country_code: string;
   country_id: number;
+  name?: string;
+  test_center_name?: string;
+  site_id?: string | number;
+  id?: string | number;
 }
 
 interface ExamSession {
@@ -71,6 +76,7 @@ export default function ExamSessionListPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [centerMap, setCenterMap] = useState<Map<string, string>>(new Map());
 
   const loadSessions = useCallback(async () => {
     try {
@@ -89,15 +95,58 @@ export default function ExamSessionListPage() {
     loadSessions();
   }, [loadSessions]);
 
+  useEffect(() => {
+    if (!sessions.length) return;
+    let active = true;
+    (async () => {
+      try {
+        const data = await api("/test-centers?locale=en&per_page=1000");
+        const centers = Array.isArray(data) ? data : (data?.data || []);
+        if (!active || !centers.length) return;
+        const map = new Map<string, string>();
+        const cityCounts = new Map<string, number>();
+        centers.forEach((row: any) => {
+          const name = String(row.name || row.test_center_name || "").trim();
+          const city = String(row.city || row.test_center_city || "").trim().toLowerCase();
+          const sid = String(row.site_id || row.id || row.test_center_id || "").trim();
+          if (sid && name) map.set(sid, name);
+          if (city) cityCounts.set(city, (cityCounts.get(city) || 0) + 1);
+        });
+        centers.forEach((row: any) => {
+          const city = String(row.city || row.test_center_city || "").trim().toLowerCase();
+          const name = String(row.name || row.test_center_name || "").trim();
+          if (city && name && cityCounts.get(city) === 1) map.set(`city:${city}`, name);
+        });
+        setCenterMap(map);
+      } catch {
+        // City fallback remains available when test-center lookup fails.
+      }
+    })();
+    return () => { active = false; };
+  }, [sessions]);
+
+  function getDisplayCenterName(session: ExamSession): string {
+    const explicit = getExplicitSessionCenterName(session);
+    if (explicit) return explicit;
+    const sid = getSessionSiteId(session);
+    if (sid && centerMap.has(sid)) return centerMap.get(sid)!;
+    const city = getSessionSiteCity(session);
+    const cityKey = `city:${city.trim().toLowerCase()}`;
+    if (city && centerMap.has(cityKey)) return centerMap.get(cityKey)!;
+    return city || "Unknown Center";
+  }
+
   const statuses = Array.from(new Set(sessions.map((s) => s.status)));
 
   const filtered = sessions.filter((s) => {
     if (activeFilter && s.status !== activeFilter) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
+    const centerName = getDisplayCenterName(s).toLowerCase();
     return (
       s.category.english_name.toLowerCase().includes(q) ||
       s.test_center.city.toLowerCase().includes(q) ||
+      centerName.includes(q) ||
       s.status.toLowerCase().includes(q)
     );
   });
@@ -144,7 +193,7 @@ export default function ExamSessionListPage() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search by occupation or city..."
+            placeholder="Search by occupation, city, or test center..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -219,7 +268,10 @@ export default function ExamSessionListPage() {
                         </span>
                         <span className="flex items-center gap-1.5">
                           <MapPin className="h-3.5 w-3.5" />
-                          {session.test_center.city}
+                          <span className="font-medium">{getDisplayCenterName(session)}</span>
+                          {getDisplayCenterName(session) !== session.test_center.city && (
+                            <span className="text-muted-foreground">({session.test_center.city})</span>
+                          )}
                         </span>
                       </div>
                     </div>

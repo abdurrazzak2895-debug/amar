@@ -303,6 +303,31 @@ export function buildCenterOptions(items: any[]): CenterOption[] {
   return Array.from(map.values());
 }
 
+export interface FallbackCenter {
+  siteId: string;
+  name: string;
+  city: string;
+}
+
+/** Extract unique test centers from SVP session data when T2Hub is down. */
+export function extractCentersFromSessions(sessions: any[]): FallbackCenter[] {
+  const map = new Map<string, FallbackCenter>();
+  sessions.forEach((item) => {
+    const city = getSessionSiteCity(item);
+    const sid = getSessionSiteId(item);
+    const explicitName = getExplicitSessionCenterName(item);
+    const key = sid || `city:${city}`;
+    if (map.has(key)) return;
+    map.set(key, { siteId: key, name: explicitName || (sid ? `Center #${sid}` : city), city });
+  });
+  return Array.from(map.values());
+}
+
+/** Returns no hard-coded centers; callers derive them from session data. */
+export function fallbackCentersForCity(_city: string): FallbackCenter[] {
+  return [];
+}
+
 export function readNumeric(payload: any, keys: string[]): number {
   for (const key of keys) {
     const v = payload?.[key] ?? payload?.balance?.[key] ?? payload?.data?.[key] ?? payload?.data?.balance?.[key];

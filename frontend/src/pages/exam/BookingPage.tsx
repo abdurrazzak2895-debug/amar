@@ -11,6 +11,7 @@ import {
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
   buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
+  extractCentersFromSessions,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
@@ -128,9 +129,19 @@ export default function BookingPage() {
     // Session dropdown look broken. Use cityCenterOptions only to enrich the
     // matching session-backed center name, or as a pre-session fallback.
     const hasSessionBackedCenters = options.length > 0;
-    const hasCityDbCenters = cityCenterOptions.length > 0;
     options.forEach((opt) => {
-      if (hasCityDbCenters && String(opt.siteId).startsWith("city:")) return;
+      if (String(opt.siteId).startsWith("city:")) {
+        const cityName = String(opt.siteId).replace("city:", "").trim().toLowerCase();
+        const matches = cityCenterOptions.filter(
+          (center) => String(center.city).trim().toLowerCase() === cityName
+        );
+        if (matches.length === 1) {
+          merged.set(String(matches[0].siteId), { ...matches[0], name: matches[0].name || opt.name });
+        } else {
+          merged.set(opt.siteId, opt);
+        }
+        return;
+      }
       const liveCenter = cityCenterOptions.find((item) => String(item.siteId) === String(opt.siteId));
       merged.set(String(opt.siteId), {
         ...opt,
@@ -652,10 +663,16 @@ export default function BookingPage() {
           city: String(row.city || selectedCity),
         });
       });
+      if (merged.size === 0 && sessions.length > 0) {
+        const fromSessions = extractCentersFromSessions(sessions).filter(
+          (center) => center.city.toLowerCase() === selectedCity.toLowerCase()
+        );
+        fromSessions.forEach((row) => merged.set(row.siteId, row));
+      }
       setCityCenterOptions(Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)));
     })();
     return () => { active = false; };
-  }, [selectedCity]);
+  }, [selectedCity, sessions]);
 
   useEffect(() => {
     let active = true;

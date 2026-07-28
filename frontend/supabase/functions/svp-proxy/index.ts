@@ -239,54 +239,68 @@ async function decryptT2HubEnvelope(envelope: any, keyRaw: string) {
 }
 
 async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSession>) {
-  const res = await fetch(`${T2HUB_BASE}${path}`, {
-    headers: {
-      Accept: "application/json, */*",
-      Referer: `${T2HUB_BASE}${session.appPath}`,
-      "User-Agent": SVP_UA,
-      ...(session.cookie ? { Cookie: session.cookie } : {}),
-    },
-  });
-  const text = await res.text();
-  let data: any;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text };
+    const res = await fetch(`${T2HUB_BASE}${path}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json, */*",
+        Referer: `${T2HUB_BASE}${session.appPath}`,
+        "User-Agent": SVP_UA,
+        ...(session.cookie ? { Cookie: session.cookie } : {}),
+      },
+    });
+    const text = await res.text();
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    if (!res.ok) {
+      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
+    }
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (!res.ok) {
-    throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
-  }
-  return data;
 }
 
 async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNullable<typeof t2hubSession>) {
-  const res = await fetch(`${T2HUB_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Accept: "application/json, */*",
-      "Content-Type": "application/json",
-      Referer: `${T2HUB_BASE}${session.appPath}`,
-      "User-Agent": SVP_UA,
-      // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected —
-      // POSTing without a matching X-CSRF-TOKEN (bound to the session cookie)
-      // fails with 419. GET endpoints don't need this.
-      ...(session.csrfToken ? { "X-CSRF-TOKEN": session.csrfToken } : {}),
-      ...(session.cookie ? { Cookie: session.cookie } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let data: any;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text };
+    const res = await fetch(`${T2HUB_BASE}${path}`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json, */*",
+        "Content-Type": "application/json",
+        Referer: `${T2HUB_BASE}${session.appPath}`,
+        "User-Agent": SVP_UA,
+        // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected —
+        // POSTing without a matching X-CSRF-TOKEN (bound to the session cookie)
+        // fails with 419. GET endpoints don't need this.
+        ...(session.csrfToken ? { "X-CSRF-TOKEN": session.csrfToken } : {}),
+        ...(session.cookie ? { Cookie: session.cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    if (!res.ok) {
+      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
+    }
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (!res.ok) {
-    throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
-  }
-  return data;
 }
 
 async function t2hubFetch(path: string) {
