@@ -1,0 +1,281 @@
+/* ==========================================================================
+   TAKAMOL — Premium dark theme.
+   Namespaced under .tk-* (root: .tk-shell). Mirrors the SVP booking theme
+   so the new live Takamol routes feel like part of the same product.
+   ========================================================================== */
+
+.tk-shell {
+  --tk-bg: #070b1a;
+  --tk-bg-2: #0b1230;
+  --tk-panel: rgba(255, 255, 255, 0.045);
+  --tk-panel-strong: rgba(255, 255, 255, 0.06);
+  --tk-panel-border: rgba(240, 200, 105, 0.18);
+  --tk-glass-border: rgba(255, 255, 255, 0.08);
+  --tk-gold: #f0c869;
+  --tk-gold-deep: #d4a437;
+  --tk-teal: #2dd4bf;
+  --tk-text: #eef1fb;
+  --tk-muted: #93a0c4;
+  --tk-danger: #f87171;
+  --tk-success: #34d399;
+  --tk-info: #60a5fa;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: var(--tk-text);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(240, 200, 105, 0.10), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(45, 212, 191, 0.16), transparent 60%),
+    linear-gradient(160deg, var(--tk-bg) 0%, var(--tk-bg-2) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tk-shell *,
+.tk-shell *::before,
+.tk-shell *::after { box-sizing: border-box; }
+
+/* ── Container ────────────────────────────────────────── */
+.tk-container {
+  width: min(1180px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px 22px 60px;
+}
+
+/* ── Top bar / nav ────────────────────────────────────── */
+.tk-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 22px;
+  background: rgba(7, 11, 26, 0.78);
+  border-bottom: 1px solid var(--tk-glass-border);
+  backdrop-filter: blur(12px);
+}
+.tk-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.tk-brand .tk-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--tk-gold), var(--tk-gold-deep));
+  color: #0b1230;
+  font-weight: 900;
+}
+.tk-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tk-nav a,
+.tk-nav button.tk-navbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--tk-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.tk-nav a:hover,
+.tk-nav button.tk-navbtn:hover { color: var(--tk-text); background: var(--tk-panel); }
+.tk-nav a.active { color: var(--tk-gold); background: var(--tk-panel-strong); border-color: var(--tk-panel-border); }
+
+/* ── Hero / status card ───────────────────────────────── */
+.tk-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  padding: 28px 32px;
+  background:
+    linear-gradient(120deg, rgba(240, 200, 105, 0.16) 0%, rgba(45, 212, 191, 0.14) 55%, rgba(12, 18, 46, 0.5) 100%);
+  border: 1px solid var(--tk-panel-border);
+  backdrop-filter: blur(10px);
+}
+.tk-hero h1 {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 800;
+  margin: 0 0 6px;
+}
+.tk-hero p { margin: 0 0 14px; color: var(--tk-muted); font-size: 0.94rem; }
+.tk-hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ── Cards ────────────────────────────────────────────── */
+.tk-card {
+  background: var(--tk-panel);
+  border: 1px solid var(--tk-glass-border);
+  border-radius: 16px;
+  padding: 20px 22px;
+}
+.tk-card h2, .tk-card h3 { margin: 0 0 12px; font-weight: 700; font-size: 1.02rem; }
+.tk-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.tk-grid { display: grid; gap: 16px; }
+.tk-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tk-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .tk-grid-2, .tk-grid-3 { grid-template-columns: 1fr; } }
+
+/* ── Forms ────────────────────────────────────────────── */
+.tk-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
+.tk-field label { font-size: 0.78rem; font-weight: 600; color: var(--tk-muted); letter-spacing: 0.03em; text-transform: uppercase; }
+.tk-field input,
+.tk-field select,
+.tk-field textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tk-glass-border);
+  border-radius: 10px;
+  padding: 11px 13px;
+  color: var(--tk-text);
+  font-size: 0.92rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.tk-field input:focus,
+.tk-field select:focus,
+.tk-field textarea:focus { border-color: var(--tk-gold); }
+.tk-field select option { background: #0b1230; color: var(--tk-text); }
+
+.tk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 11px;
+  border: 1px solid var(--tk-glass-border);
+  background: var(--tk-panel-strong);
+  color: var(--tk-text);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+.tk-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.tk-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.tk-btn--gold {
+  background: linear-gradient(135deg, var(--tk-gold), var(--tk-gold-deep));
+  color: #0b1230;
+  border-color: transparent;
+}
+.tk-btn--gold:hover { filter: brightness(1.08); background: linear-gradient(135deg, var(--tk-gold), var(--tk-gold-deep)); }
+.tk-btn--teal {
+  background: linear-gradient(135deg, #2dd4bf, #0d9488);
+  color: #03121f;
+  border-color: transparent;
+}
+.tk-btn--teal:hover { filter: brightness(1.08); background: linear-gradient(135deg, #2dd4bf, #0d9488); }
+.tk-btn--danger { background: rgba(248, 113, 113, 0.14); color: var(--tk-danger); border-color: rgba(248, 113, 113, 0.35); }
+.tk-btn--ghost { background: transparent; }
+.tk-btn--sm { padding: 7px 12px; font-size: 0.8rem; border-radius: 9px; }
+
+/* ── Badges ───────────────────────────────────────────── */
+.tk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--tk-glass-border);
+  background: var(--tk-panel);
+  color: var(--tk-muted);
+}
+.tk-badge--ok { color: var(--tk-success); border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.1); }
+.tk-badge--warn { color: var(--tk-gold); border-color: rgba(240, 200, 105, 0.4); background: rgba(240, 200, 105, 0.1); }
+.tk-badge--danger { color: var(--tk-danger); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }
+.tk-badge--info { color: var(--tk-info); border-color: rgba(96, 165, 250, 0.4); background: rgba(96, 165, 250, 0.1); }
+
+/* ── Messages ─────────────────────────────────────────── */
+.tk-msg { border-radius: 12px; padding: 12px 16px; font-size: 0.9rem; margin-bottom: 14px; }
+.tk-msg--error { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.35); color: var(--tk-danger); }
+.tk-msg--ok { background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.35); color: var(--tk-success); }
+.tk-msg--info { background: rgba(96, 165, 250, 0.1); border: 1px solid rgba(96, 165, 250, 0.35); color: var(--tk-info); }
+
+/* ── Lists / rows ─────────────────────────────────────── */
+.tk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--tk-panel);
+  border: 1px solid var(--tk-glass-border);
+  margin-bottom: 10px;
+}
+.tk-row-main { flex: 1; min-width: 0; }
+.tk-row-title { font-weight: 700; font-size: 0.95rem; }
+.tk-row-sub { color: var(--tk-muted); font-size: 0.82rem; margin-top: 3px; }
+.tk-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.tk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--tk-glass-border);
+  background: var(--tk-panel);
+  font-size: 0.78rem;
+  color: var(--tk-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tk-chip:hover { color: var(--tk-text); border-color: var(--tk-panel-border); }
+.tk-chip--active { color: var(--tk-gold); border-color: var(--tk-panel-border); background: var(--tk-panel-strong); }
+
+/* ── Empty / loading ──────────────────────────────────── */
+.tk-empty { text-align: center; color: var(--tk-muted); padding: 34px 12px; font-size: 0.9rem; }
+.tk-loading { display: inline-flex; align-items: center; gap: 9px; color: var(--tk-muted); font-size: 0.88rem; }
+.tk-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(240, 200, 105, 0.25); border-top-color: var(--tk-gold); animation: tk-spin 0.8s linear infinite; }
+@keyframes tk-spin { to { transform: rotate(360deg); } }
+
+/* ── Tables ───────────────────────────────────────────── */
+.tk-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.tk-table th { text-align: left; color: var(--tk-muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 12px; border-bottom: 1px solid var(--tk-glass-border); }
+.tk-table td { padding: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); vertical-align: top; }
+
+/* ── Status dot ───────────────────────────────────────── */
+.tk-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.tk-dot--ok { background: var(--tk-success); box-shadow: 0 0 8px rgba(52, 211, 153, 0.7); }
+.tk-dot--off { background: var(--tk-danger); box-shadow: 0 0 8px rgba(248, 113, 113, 0.7); }
+
+.tk-muted { color: var(--tk-muted); }
+.tk-gold { color: var(--tk-gold); }
+.tk-success { color: var(--tk-success); }
+.tk-danger { color: var(--tk-danger); }

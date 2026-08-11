@@ -34,6 +34,14 @@ import AccessSectionRulesPage from "@/pages/access/AccessSectionRulesPage";
 import ResultVerificationPage from "@/pages/access/ResultVerificationPage";
 import TestCenterDetailPage from "@/pages/exam/TestCenterDetailPage";
 import NotFound from "@/pages/NotFound";
+import { TakamolAuthProvider } from "@/contexts/TakamolAuthContext";
+import TakamolLayout from "@/pages/takamol/TakamolLayout";
+import TakamolLoginPage from "@/pages/takamol/TakamolLoginPage";
+import TakamolDashboardPage from "@/pages/takamol/TakamolDashboardPage";
+import TakamolBookingPage from "@/pages/takamol/TakamolBookingPage";
+import TakamolReservationsPage from "@/pages/takamol/TakamolReservationsPage";
+import TakamolSessionsPage from "@/pages/takamol/TakamolSessionsPage";
+import TakamolResultsPage from "@/pages/takamol/TakamolResultsPage";
 
 const queryClient = new QueryClient();
 
@@ -41,14 +49,15 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <AccessAuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <SpeedInsights />
-          <BrowserRouter>
-            <Routes>
-              {/* SVP Auth */}
-              <Route path="/" element={<Navigate to="/access/login" replace />} />
+        <TakamolAuthProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <SpeedInsights />
+            <BrowserRouter>
+              <Routes>
+                {/* SVP Auth */}
+                <Route path="/" element={<Navigate to="/access/login" replace />} />
               <Route path="/auth/login" element={<LoginPage />} />
               <Route path="/auth/otp" element={<AccessProtectedRoute allowedRoles={["USER"]}><OtpPage /></AccessProtectedRoute>} />
               <Route path="/auth/register" element={<RegisterPage />} />
@@ -78,11 +87,24 @@ const App = () => (
               <Route path="/access/section-rules" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><AccessSectionRulesPage /></AccessProtectedRoute>} />
               <Route path="/access/result-verification" element={<AccessProtectedRoute allowedRoles={["ADMIN"]}><ResultVerificationPage /></AccessProtectedRoute>} />
 
+              {/* Takamol Live Console */}
+              <Route path="/takamol" element={<TakamolLayout />}>
+                <Route index element={<Navigate to="/takamol/dashboard" replace />} />
+                <Route path="login" element={<TakamolLoginPage />} />
+                <Route path="dashboard" element={<TakamolDashboardPage />} />
+                <Route path="booking" element={<TakamolBookingPage />} />
+                <Route path="reservations" element={<TakamolReservationsPage />} />
+                <Route path="sessions" element={<TakamolSessionsPage />} />
+                <Route path="results" element={<TakamolResultsPage />} />
+                <Route path="search" element={<TakamolDashboardPage />} />
+              </Route>
+
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
-      </AccessAuthProvider>
+      </TakamolAuthProvider>
+    </AccessAuthProvider>
     </AuthProvider>
   </QueryClientProvider>
 );
