@@ -1,8 +1,8 @@
 /**
  * Takamol live API client.
  *
- * Points at the live Playwright-MCP noVNC backend:
- *   https://playwright-mcp-vnc-production.up.railway.app
+ * Points at the live Playwright-MCP noVNC backend (humorous-respect on Railway):
+ *   https://takamol-api.up.railway.app
  *
  * Every endpoint returns the envelope:
  *   { success: boolean, data: T, error?: string }
@@ -18,7 +18,7 @@ const TAKAMOL_ENV_URL =
   (import.meta.env.VITE_TAKAMOL_API_URL as string | undefined)?.trim() || "";
 
 // Used for console links / display.
-const TAKAMOL_RAW_URL = TAKAMOL_ENV_URL || "https://playwright-mcp-vnc-production.up.railway.app";
+const TAKAMOL_RAW_URL = TAKAMOL_ENV_URL || "https://takamol-api.up.railway.app";
 
 /**
  * Where requests actually go:
