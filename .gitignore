@@ -117,3 +117,6 @@ credentials.json
 # Supabase CLI local cache
 frontend/supabase/.temp/
 supabase/.temp/
+
+# VS Code AI tooling (kilo) — local-only artifacts
+.kilo/
