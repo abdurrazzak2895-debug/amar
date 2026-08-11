@@ -2,7 +2,7 @@ name: Deploy Supabase (functions + migrations)
 
 on:
   push:
-    branches: [main]
+    branches: [main, agents/hi]
     paths:
       - "frontend/supabase/functions/**"
       - "frontend/supabase/migrations/**"
