@@ -1,7 +1,8 @@
 /**
  * Takamol live API client.
  *
- * Points at the live Playwright-MCP noVNC backend (humorous-respect on Railway):
+ * Routed through the `takamol-proxy` Supabase edge function, which forwards
+ * to the live Playwright-MCP noVNC backend (humorous-respect on Railway):
  *   https://takamol-api.up.railway.app
  *
  * Every endpoint returns the envelope:
@@ -11,9 +12,10 @@
  * `/api/takamol/ticket`) return HTTP 401 until the Playwright login has been
  * completed through the noVNC console (POST /api/auth/login launches it).
  * The frontend never talks to the upstream portal directly — everything goes
- * through this backend, exactly like the rest of the SVP app.
+ * through Supabase, exactly like the rest of the SVP app.
  */
 
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || "";
 const TAKAMOL_ENV_URL =
   (import.meta.env.VITE_TAKAMOL_API_URL as string | undefined)?.trim() || "";
 
@@ -22,13 +24,14 @@ const TAKAMOL_RAW_URL = TAKAMOL_ENV_URL || "https://takamol-api.up.railway.app";
 
 /**
  * Where requests actually go:
- *  - When VITE_TAKAMOL_API_URL is set to an absolute URL → directly there.
- *  - When unset (the default committed build) → same-origin proxy path
- *    `/takamol-api`, forwarded to the live backend by the Vite dev proxy and
- *    the Vercel `vercel.json` rewrite. This avoids CORS: the Railway backend
- *    does not send Access-Control-Allow-Origin headers.
+ *  - When VITE_TAKAMOL_API_URL is set to an absolute URL → directly there
+ *    (escape hatch for local/manual testing against Railway).
+ *  - Otherwise (the default committed build) → the `takamol-proxy` Supabase
+ *    edge function, same pattern as every other `access-*`/`svp-*` call in
+ *    this app. This avoids CORS (the function sets its own headers) and
+ *    means Vercel no longer needs a hardcoded Railway rewrite.
  */
-const API_BASE = TAKAMOL_ENV_URL || "/takamol-api";
+const API_BASE = TAKAMOL_ENV_URL || `${SUPABASE_URL}/functions/v1/takamol-proxy`;
 
 export function getTakamolBaseUrl(): string {
   return TAKAMOL_RAW_URL;

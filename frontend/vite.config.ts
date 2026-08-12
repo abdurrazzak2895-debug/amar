@@ -18,10 +18,13 @@ export default defineConfig(({ mode }) => {
       hmr: {
         overlay: false,
       },
-      // The live Takamol backend (Railway) sends no CORS headers, so the
-      // browser must not call it directly. In dev we proxy same-origin
-      // /takamol-api/* -> https://takamol-api.up.railway.app/api/*
-      // (Vercel does the same in production via vercel.json rewrites).
+      // The live Takamol backend (Railway) sends no CORS headers. In
+      // production the frontend now routes through the `takamol-proxy`
+      // Supabase edge function instead of calling Railway directly (see
+      // src/lib/takamol-api.ts). This local proxy is kept only as a manual
+      // escape hatch for testing directly against Railway in dev — it's
+      // unused unless VITE_TAKAMOL_API_URL is explicitly set to
+      // "/takamol-api".
       proxy: {
         "/takamol-api": {
           target: "https://takamol-api.up.railway.app",
