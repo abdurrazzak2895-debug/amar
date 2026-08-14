@@ -11,53 +11,16 @@ import {
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
   buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
-  extractCentersFromSessions,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
-
-const FALLBACK_TEST_CENTERS: { siteId: string; name: string; city: string }[] = [
-  { siteId: "17", name: "Bangladesh Korea TTC Dhaka", city: "Dhaka" },
-  { siteId: "45", name: "Bangladesh German TTC", city: "Dhaka" },
-  { siteId: "53", name: "Bangladesh Korea TTC Chattogram", city: "Chattogram" },
-  { siteId: "54", name: "Rajshahi Technical Training Centre", city: "Rajshahi" },
-  { siteId: "60", name: "Barishal Technical Training Center", city: "Barishal" },
-  { siteId: "62", name: "Cumilla Technical Training Centre", city: "Cumilla" },
-  { siteId: "68", name: "Nilphamari Technical Training Center", city: "Nilphamari" },
-  { siteId: "70", name: "Mymensingh Technical Training Centre", city: "Mymensingh" },
-  { siteId: "71", name: "Sylhet Technical Training Center", city: "Sylhet" },
-  { siteId: "102", name: "Tangail Technical Training Center", city: "Dhaka" },
-  { siteId: "107", name: "Bogura Technical Training Centre", city: "Rajshahi" },
-  { siteId: "115", name: "BRTC Central Training Institute Gazipur", city: "Dhaka" },
-  { siteId: "156", name: "Khulna Technical Training Centre", city: "Khulna" },
-  { siteId: "166", name: "Faridpur Technical Training Centre", city: "Barishal" },
-  { siteId: "171", name: "Jashore Technical Training Centre", city: "Khulna" },
-  { siteId: "174", name: "Brahmanbaria Technical Training Centre", city: "Cumilla" },
-  { siteId: "180", name: "Madaripur Technical Training Centre", city: "Barishal" },
-  { siteId: "181", name: "Narail Technical Training Centre", city: "Khulna" },
-  { siteId: "201", name: "Pabna Technical Training Centre", city: "Rajshahi" },
-  { siteId: "203", name: "Noakhali Technical Training Centre", city: "Cumilla" },
-  { siteId: "208", name: "Tangail Ttc", city: "Tangail" },
-  { siteId: "218", name: "Narsingdi Technical Training Center", city: "Dhaka" },
-  { siteId: "220", name: "Kishoreganj Technical Training Centre", city: "Dhaka" },
-  { siteId: "221", name: "Shariatpur Technical Training Centre", city: "Dhaka" },
-  { siteId: "223", name: "Manikganj Technical Training Center", city: "Dhaka" },
-  { siteId: "265", name: "Joypurhat Technical Training Center", city: "Rajshahi" },
-];
-
-function fallbackCentersForCity(city: string) {
-  const c = String(city || "").trim().toLowerCase();
-  return FALLBACK_TEST_CENTERS.filter((item) => item.city.toLowerCase() === c);
-}
-
-
-
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
   const { hasPermission } = useAccessAuth();
   const [occupations, setOccupations] = useState<any[]>([]);
   const [availableDateEntries, setAvailableDateEntries] = useState<{ city: string; date: string }[]>([]);
+  const [liveCityOptions, setLiveCityOptions] = useState<string[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [testCenterMap, setTestCenterMap] = useState<Map<string, string>>(new Map());
   // name (lowercased) -> site_id, resolved from local DB so we can stamp site_id
@@ -80,6 +43,7 @@ export default function BookingPage() {
   const [sessionId, setSessionId] = useState("");
   const [languageCode, setLanguageCode] = useState("");
   const [holdId, setHoldId] = useState("");
+  const [holdExpiresAt, setHoldExpiresAt] = useState("");
   const [reservationId, setReservationId] = useState("");
   const [paymentSession, setPaymentSession] = useState<{ reservationId: string; url: string; checkoutId: string; resultUrl: string } | null>(null);
   const [loadingOccupations, setLoadingOccupations] = useState(false);
@@ -108,53 +72,32 @@ export default function BookingPage() {
     () => occupationSearch ? occupations.filter((item) => item.name?.toLowerCase().includes(occupationSearch.toLowerCase())) : occupations,
     [occupations, occupationSearch]
   );
-  const cityOptions = useMemo(() => buildCityOptions(availableDateEntries), [availableDateEntries]);
+  const cityOptions = useMemo(
+    () => liveCityOptions.length ? liveCityOptions : buildCityOptions(availableDateEntries),
+    [liveCityOptions, availableDateEntries]
+  );
   const availableDates = useMemo(() => buildDateOptions(availableDateEntries, selectedCity), [availableDateEntries, selectedCity]);
   const cityFilteredSessions = useMemo(
     () => selectedCity ? sessions.filter((item) => String(getSessionSiteCity(item)).trim().toLowerCase() === String(selectedCity).trim().toLowerCase()) : sessions,
     [sessions, selectedCity]
   );
   const sessionsWithResolvedCenters = useMemo(
-    () => cityFilteredSessions.map((item) => resolveSessionCenter(item, testCenterMap, centerNameToSiteId, sessionIdToSiteId, sectionRules)),
-    [cityFilteredSessions, testCenterMap, centerNameToSiteId, sessionIdToSiteId, sectionRules]
+    () => cityFilteredSessions.map((item) => resolveSessionCenter(item, new Map(), new Map(), new Map(), [])),
+    [cityFilteredSessions]
   );
   const centerOptions = useMemo(() => {
-    const options = buildCenterOptions(sessionsWithResolvedCenters);
-    const merged = new Map<string, { siteId: string; name: string; city: string }>();
-    const sessionBackedSiteIds = new Set(options.map((opt) => String(opt.siteId)));
+    const live = cityCenterOptions
+      .filter((center) => !selectedCity || String(center.city).trim().toLowerCase() === String(selectedCity).trim().toLowerCase())
+      .filter((center) => center.siteId && center.name);
+    if (live.length) return [...live].sort((a, b) => a.name.localeCompare(b.name));
 
-    // When sessions are loaded, the dropdown must only contain centers that
-    // actually have available sessions. Otherwise a city-wide t2hub center list
-    // can auto-select a center with no matching session and make the Exam
-    // Session dropdown look broken. Use cityCenterOptions only to enrich the
-    // matching session-backed center name, or as a pre-session fallback.
-    const hasSessionBackedCenters = options.length > 0;
-    options.forEach((opt) => {
-      if (String(opt.siteId).startsWith("city:")) {
-        const cityName = String(opt.siteId).replace("city:", "").trim().toLowerCase();
-        const matches = cityCenterOptions.filter(
-          (center) => String(center.city).trim().toLowerCase() === cityName
-        );
-        if (matches.length === 1) {
-          merged.set(String(matches[0].siteId), { ...matches[0], name: matches[0].name || opt.name });
-        } else {
-          merged.set(opt.siteId, opt);
-        }
-        return;
-      }
-      const liveCenter = cityCenterOptions.find((item) => String(item.siteId) === String(opt.siteId));
-      merged.set(String(opt.siteId), {
-        ...opt,
-        name: liveCenter?.name || testCenterMap.get(opt.siteId) || opt.name,
-        city: liveCenter?.city || opt.city,
-      });
-    });
-    cityCenterOptions.forEach((opt) => {
-      if (hasSessionBackedCenters && !sessionBackedSiteIds.has(String(opt.siteId))) return;
-      merged.set(String(opt.siteId), opt);
-    });
-    return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [sessionsWithResolvedCenters, testCenterMap, cityCenterOptions]);
+    // If the center endpoint is temporarily unavailable, only use explicit
+    // center identity carried by the live SVP sessions; never use hard-coded
+    // or locally mirrored center rows.
+    return buildCenterOptions(sessionsWithResolvedCenters)
+      .filter((center) => center.siteId && !String(center.siteId).startsWith("city:"))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [sessionsWithResolvedCenters, cityCenterOptions, selectedCity]);
   const getResolvedSessionCenterName = (item: any) => {
     // SVP-first: if the session already carries its own real test_center_name
     // (new SVP shape), use that. This guarantees per-session correctness even
@@ -166,13 +109,13 @@ export default function BookingPage() {
       const mapped = testCenterMap.get(key);
       if (mapped) return mapped;
     }
-    // SVP gave no name and the local DB has no mapping for this site — fall back
-    // to the live t2hub center list (already fetched for the selected city),
-    // matched by site id.
+    // If SVP returned only the real center ID, resolve its full name from the
+    // live center endpoint for the selected city before consulting any legacy
+    // local mappings.
     const siteId = String(getSessionSiteId(item));
     if (siteId) {
-      const fromT2hub = cityCenterOptions.find((option) => String(option.siteId) === siteId);
-      if (fromT2hub?.name) return fromT2hub.name;
+      const liveCenter = cityCenterOptions.find((option) => String(option.siteId) === siteId);
+      if (liveCenter?.name) return liveCenter.name;
     }
     // SVP frequently supplies no site_id at all (its exam_session.test_center
     // is often just {city, country_code, country_id}) — nothing to match by
@@ -191,22 +134,22 @@ export default function BookingPage() {
   };
   const filteredSessions = useMemo(
     () => {
-      if (!selectedCenterId) return sessionsWithResolvedCenters;
-      const exact = sessionsWithResolvedCenters.filter((item) => getCenterKey(item) === String(selectedCenterId));
-      if (exact.length) return exact;
-
-      const selectedCenter = centerOptions.find((item) => String(item.siteId) === String(selectedCenterId));
-      if (!selectedCenter) return [];
-      if (String(selectedCenter.siteId).startsWith("city:") && selectedCenter.city) {
-        return sessionsWithResolvedCenters.filter(
-          (item) => String(getSessionSiteCity(item)).trim().toLowerCase() === String(selectedCenter.city).trim().toLowerCase()
-        );
-      }
-      const selectedName = String(selectedCenter.name || "").trim().toLowerCase();
-      if (!selectedName) return [];
-      return sessionsWithResolvedCenters.filter(
-        (item) => getResolvedSessionCenterName(item).trim().toLowerCase() === selectedName
+      if (!selectedCenterId) return [];
+      const byId = sessionsWithResolvedCenters.filter(
+        (item) => String(getSessionSiteId(item)) === String(selectedCenterId)
       );
+      if (byId.length) return byId;
+
+      // Legacy live responses may carry the full center name but omit its ID.
+      // A name fallback is allowed only when the selected live center has a
+      // unique matching name; it never falls back to the whole city.
+      const selectedCenter = centerOptions.find((item) => String(item.siteId) === String(selectedCenterId));
+      const selectedName = String(selectedCenter?.name || "").trim().toLowerCase();
+      return selectedName
+        ? sessionsWithResolvedCenters.filter(
+            (item) => !getSessionSiteId(item) && getResolvedSessionCenterName(item).trim().toLowerCase() === selectedName
+          )
+        : [];
     },
     [sessionsWithResolvedCenters, selectedCenterId, centerOptions]
   );
@@ -622,85 +565,23 @@ export default function BookingPage() {
     setCategoryId(String(selectedOccupation.categoryId || ""));
     setLanguageCode((prev) => prev || String(selectedOccupation.languageCodes[0]?.code || ""));
     setMethodology(String(selectedOccupation.methodology || "in_person"));
-    setSelectedCity(""); setAvailableDate(""); setAvailableDateEntries([]); setSessions([]);
-    setSelectedCenterId(""); setSessionId(""); setHoldId(""); setReservationId("");
+    setSelectedCity(""); setAvailableDate(""); setAvailableDateEntries([]); setLiveCityOptions([]); setSessions([]);
+    setSelectedCenterId(""); setSessionId(""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
   }, [selectedOccupation]);
 
   useEffect(() => {
-    setAvailableDate(""); setSessions([]); setSelectedCenterId(""); setSessionId("");
-    setSiteId(""); setSiteCity(selectedCity || ""); setHoldId(""); setReservationId("");
+    setAvailableDate(""); setSessions([]); setCityCenterOptions([]); setSelectedCenterId(""); setSessionId("");
+    setSiteId(""); setSiteCity(selectedCity || ""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
     if (selectedCity) setStatus(`City selected: ${selectedCity}. Loading sessions for the selected date.`);
   }, [selectedCity]);
 
-  // Load session-center mappings to populate test centers dropdown
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const mappings: any = await api(`/session-centers`);
-        if (!active) return;
-        const maps = pickArray(mappings);
-        if (!maps.length) return;
-        // Build a map from session_id → { site_id, center_name }
-        const sessionToCenterMap = new Map<string, { site_id: string; name: string }>();
-        maps.forEach((map: any) => {
-          const sesId = map?.exam_session_id || map?.id;
-          const siteId = map?.site_id;
-          const name = map?.center_name || map?.name;
-          if (sesId && siteId) {
-            sessionToCenterMap.set(String(sesId), { site_id: String(siteId), name: String(name || `Site #${siteId}`) });
-          }
-        });
-        // Inject center details into sessions
-        setSessions(prevSessions => 
-          prevSessions.map((s: any) => {
-            const sesId = getSessionId(s);
-            const mapping = sessionToCenterMap.get(String(sesId));
-            return mapping ? { ...s, site_id: mapping.site_id, test_center_name: mapping.name } : s;
-          })
-        );
-      } catch (err: any) {
-        // Silently fail - session-centers might not be available
-        console.warn("Could not load session-center mappings:", err?.message);
-      }
-    })();
-    return () => { active = false; };
-  }, []);
+  // The booking page does not load session-center mappings from Supabase.
+  // Center identity comes from the live SVP proxy response only.
 
-  // Load test centers from database
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      if (!selectedCity) { setCityCenterOptions([]); return; }
-      const fallbackRows = fallbackCentersForCity(selectedCity);
-      const { data } = await supabase
-        .from("test_centers")
-        .select("site_id, name, city")
-        .eq("city", selectedCity)
-        .order("name", { ascending: true });
-      if (!active) return;
-      const merged = new Map<string, { siteId: string; name: string; city: string }>();
-      fallbackRows.forEach((row) => merged.set(row.siteId, row));
-      (data || []).forEach((row: any) => {
-        const siteId = String(row.site_id);
-        merged.set(siteId, {
-          siteId,
-          name: String(row.name || `Site #${row.site_id}`),
-          city: String(row.city || selectedCity),
-        });
-      });
-      if (merged.size === 0 && sessions.length > 0) {
-        const fromSessions = extractCentersFromSessions(sessions).filter(
-          (center) => center.city.toLowerCase() === selectedCity.toLowerCase()
-        );
-        fromSessions.forEach((row) => merged.set(row.siteId, row));
-      }
-      setCityCenterOptions(Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)));
-    })();
-    return () => { active = false; };
-  }, [selectedCity, sessions]);
+  // Live SVP centers are loaded by the category/city effect below. No
+  // Supabase mirror or hard-coded center fallback is used in this path.
 
   useEffect(() => {
     let active = true;
@@ -717,6 +598,7 @@ export default function BookingPage() {
         if (!active) return;
         const entries = normalizeAvailableDateEntries(pickArray(data));
         const cities = buildCityOptions(entries);
+        setLiveCityOptions(cities);
         setAvailableDateEntries(entries);
         setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || ""));
       } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(err?.message || "Failed to load available dates"); }
@@ -729,6 +611,21 @@ export default function BookingPage() {
     setAvailableDate((prev) => (prev && availableDates.includes(prev) ? prev : availableDates[0] || ""));
     setCalendarMonth(availableDates[0] ? availableDates[0].slice(0, 7) : normalizeDateValue(new Date().toISOString()).slice(0, 7));
   }, [availableDates]);
+
+  // A date change creates a new center/session context. Clear all downstream
+  // selections and the previous hold before requesting center-specific sessions.
+  useEffect(() => {
+    setSessions([]);
+    setCityCenterOptions([]);
+    setSelectedCenterId("");
+    setSessionId("");
+    setSiteId("");
+    setSiteCity(selectedCity || "");
+    setHoldId("");
+    setHoldExpiresAt("");
+    setReservationId("");
+    setPaymentSession(null);
+  }, [availableDate]);
 
   useEffect(() => { if (!selectedCity || !availableDates.length) setIsDatePickerOpen(false); }, [selectedCity, availableDates.length]);
 
@@ -772,82 +669,64 @@ export default function BookingPage() {
     return () => { active = false; };
   }, [selectedOccupationId, methodology]);
 
+  // Load authoritative live SVP centers for the selected occupation category
+  // and city. A city can have many centers, so no local mirror is consulted.
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!selectedCity || !availableDate || !categoryId) { setSessions([]); return; }
+      if (!selectedCity || !categoryId) { setCityCenterOptions([]); return; }
+      try {
+        const params = new URLSearchParams({ category_id: String(categoryId), city: String(selectedCity) });
+        const data: any = await api(`/test-centers?${params.toString()}`);
+        if (!active) return;
+        const rawCenters = Array.isArray(data?.test_centers) ? data.test_centers : pickArray(data);
+        const normalized = rawCenters.map((center: any) => ({
+          siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
+          name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
+          city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
+        })).filter((center: any) => center.siteId && center.name);
+        setCityCenterOptions(normalized);
+      } catch (err: any) {
+        if (!active) return;
+        setCityCenterOptions([]);
+        setError(err?.message || "Failed to load live SVP test centers");
+      }
+    })();
+    return () => { active = false; };
+  }, [selectedCity, categoryId]);
+
+  // Sessions are always requested with the exact selected center ID. This is
+  // the key protection against mixing several centers in one city.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
       setLoadingSessions(true); setError("");
       try {
-        const params = new URLSearchParams({ 
-          category_id: String(categoryId), 
-          city: String(selectedCity), 
-          test_date: availableDate, 
-          locale: "en" 
+        const params = new URLSearchParams({
+          category_id: String(categoryId),
+          city: String(selectedCity),
+          exam_date: availableDate,
+          test_center_id: String(selectedCenterId),
         });
         const data: any = await api(`/exam-sessions?${params.toString()}`);
         if (!active) return;
-        const sessions = pickArray(data);
-        // Do not pre-filter session list by selectedCenterId here.
-        // The selected center is applied later via filteredSessions so that
-        // changing the selection still works without reloading the raw session list.
-        setSessions(sessions);
-      } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load test sessions"); }
+        const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
+        setSessions(liveSessions.filter((session: any) => {
+          const centerId = getSessionSiteId(session);
+          return !centerId || String(centerId) === String(selectedCenterId);
+        }));
+      } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load center-specific exam sessions"); }
       finally { if (active) setLoadingSessions(false); }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId]);
+  }, [selectedCity, availableDate, categoryId, selectedCenterId]);
 
-  // Admin-defined exam_session_id -> site_id mapping (deterministic).
-  // Loaded from Lovable Cloud whenever sessions change. Also fetches the
-  // matching test_centers row so we have the canonical center NAME for each
-  // admin-mapped site_id (stored under `site:<siteId>` in testCenterMap).
-  useEffect(() => {
-    if (!sessions.length) return;
-    let active = true;
-    (async () => {
-      // Prefer the stable numeric_session_id (present on T2Hub-sourced sessions)
-      // over getSessionId(), which returns the encrypted_session_id token when
-      // present — Number(encryptedToken) is always NaN, so the old code silently
-      // dropped every session here whenever SVP's own encrypted ID was used.
-      // Official SVP-direct sessions have no stable numeric ID at all (confirmed
-      // from live response shape), so admin exact-mapping can only ever apply to
-      // T2Hub-sourced sessions — that's an architecture limit, not a bug to "fix" further.
-      const ids = Array.from(new Set(sessions.map((s: any) => Number(s?.numeric_session_id ?? getSessionId(s))).filter((n) => Number.isFinite(n) && n > 0)));
-      if (!ids.length) return;
-      const { data: maps } = await supabase
-        .from("exam_session_centers")
-        .select("exam_session_id, site_id")
-        .in("exam_session_id", ids);
-      if (!active || !maps?.length) return;
-      const newSessionMap = new Map(sessionIdToSiteId);
-      let sessionMapChanged = false;
-      maps.forEach((row: any) => {
-        const k = String(row.exam_session_id);
-        const v = String(row.site_id);
-        if (newSessionMap.get(k) !== v) { newSessionMap.set(k, v); sessionMapChanged = true; }
-      });
-      const siteIds = Array.from(new Set(maps.map((r: any) => Number(r.site_id))));
-      const { data: centers } = await supabase
-        .from("test_centers")
-        .select("site_id, name")
-        .in("site_id", siteIds);
-      if (!active) return;
-      const newTcMap = new Map(testCenterMap);
-      const newNameMap = new Map(centerNameToSiteId);
-      let tcChanged = false;
-      let nameChanged = false;
-      centers?.forEach((row: any) => {
-        const siteKey = `site:${row.site_id}`;
-        if (newTcMap.get(siteKey) !== row.name) { newTcMap.set(siteKey, row.name); tcChanged = true; }
-        const nk = String(row.name || "").trim().toLowerCase();
-        if (nk && newNameMap.get(nk) !== String(row.site_id)) { newNameMap.set(nk, String(row.site_id)); nameChanged = true; }
-      });
-      if (sessionMapChanged) setSessionIdToSiteId(newSessionMap);
-      if (tcChanged) setTestCenterMap(newTcMap);
-      if (nameChanged) setCenterNameToSiteId(newNameMap);
-    })();
-    return () => { active = false; };
-  }, [sessions]);
+  // Legacy local center mappings are intentionally not used for the live SVP
+  // selection path. The live proxy enriches every center-scoped session with
+  // its real ID and full name.
+  // No local exam_session_centers mapping is applied here. The live SVP proxy
+  // is the only source of session-to-center identity for this booking page.
 
   // Load all section center rules once. Also pre-load test_centers names for rule sites.
   useEffect(() => {
@@ -1010,9 +889,14 @@ export default function BookingPage() {
   }, [sessions]);
 
   useEffect(() => {
-    if (!centerOptions.length) { setSelectedCenterId(""); return; }
+    if (!selectedCenterId || !centerOptions.length) return;
     const hasSelected = centerOptions.some((item) => String(item.siteId) === String(selectedCenterId));
-    if (!selectedCenterId || !hasSelected) setSelectedCenterId(String(centerOptions[0].siteId));
+    if (!hasSelected) {
+      setSelectedCenterId("");
+      setSessionId("");
+      setHoldId("");
+      setHoldExpiresAt("");
+    }
   }, [centerOptions, selectedCenterId]);
 
   useEffect(() => {
@@ -1102,7 +986,7 @@ export default function BookingPage() {
   }, [sessionId, selectedSession]);
 
   async function createHold() {
-    if (!sessionId) { setError("Select test center / session first"); return; }
+    if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     // Only hold the SELECTED session, not every session in the city.
     // Holding the whole city would let SVP confirm a different test center
     // when the booking POST is made with hold_id, because the hold covers
@@ -1112,19 +996,33 @@ export default function BookingPage() {
       setError("No valid exam session selected for hold creation");
       return;
     }
-    const sessionIds = [selectedSessionId];
     setCreatingHold(true); setError(""); setStatus("");
     try {
-      const data = await api("/temporary-seats", { method: "POST", body: { exam_session_id: sessionIds, methodology: methodology || "in_person" } });
+      const data: any = await api("/temporary-seats", {
+        method: "POST",
+        body: {
+          exam_session_id: selectedSessionId,
+          test_center_id: String(selectedCenterId),
+        },
+      });
       const nextHoldId = extractId(data, ["id", "hold_id", "temporary_seat_id"]);
+      const nextExpiry = String(
+        data?.expired_at || data?.expires_at || data?.temporary_seat?.expired_at ||
+        data?.data?.expired_at || data?.data?.expires_at || ""
+      );
       setHoldId(String(nextHoldId || ""));
-      setStatus(nextHoldId ? `Hold created: #${nextHoldId}` : "Hold created");
+      setHoldExpiresAt(nextExpiry);
+      setSiteId(String(selectedCenterId));
+      setSiteCity(String(selectedCity));
+      setStatus(nextHoldId ? `Hold created for ${selectedCenterOption?.name || `center #${selectedCenterId}`}: #${nextHoldId}` : "Hold created");
     } catch (err: any) { setError(err?.message || "Failed to create hold"); }
     finally { setCreatingHold(false); }
   }
 
   async function bookReservation() {
-    if (!sessionId) { setError("Select test center / session first"); return; }
+    const isRescheduleRequest = searchParams.get("reschedule") === "1" && searchParams.get("reservationId");
+    if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
+    if (!isRescheduleRequest && !holdId) { setError("Create a live temporary seat hold before confirming the booking"); return; }
     const selectedSessionPayloadId = getSessionPayloadId(getSessionId(selectedSession) || sessionId);
     if (selectedSessionPayloadId === null) { setError("No valid exam session selected"); return; }
     const selectedSessionIdForApi = String(selectedSessionPayloadId);
@@ -1170,23 +1068,22 @@ export default function BookingPage() {
         setStatus(`Reservation rescheduled successfully: #${nextReservationId}`);
         if (nextReservationId) await openTicketPdf(String(nextReservationId), data);
       } else {
-        // Normal new booking.
-        //
-        // CRITICAL: Match the official SVP frontend (svp-international.pacc.sa) behaviour
-        // EXACTLY — it sends `site_id: null`, `site_city: null`, `hold_id: null` and lets
-        // the SVP server determine the test center from `exam_session_id`.
-        //
-        // If we send a `site_id`/`site_city` (e.g. an admin-mapped fallback like
-        // site_id=1), SVP treats that as an override and may confirm the booking
-        // in a DIFFERENT centre within the same city than the one the user picked.
-        // Likewise, `hold_id` is left null here so the reservation binds purely to
-        // the chosen `exam_session_id` (the temporary seat hold above is informational
-        // only — SVP's own UI never forwards hold_id into the reservation POST).
+        // Normal new booking. The selected center ID, city, opaque session token,
+        // and live hold are all sent together so one city with many centers cannot
+        // resolve to a different center during reservation creation.
         const data: any = await api("/exam-reservations", {
           method: "POST", body: {
-            exam_session_id: selectedSessionPayloadId, occupation_id: Number(selectedOccupationId),
-            methodology: methodology || "in_person", language_code: effectiveLanguageCode,
-            site_id: null, site_city: null, hold_id: null,
+            exam_session_id: String(selectedSessionPayloadId),
+            occupation_id: Number(selectedOccupationId),
+            methodology: methodology || "in_person",
+            language_code: effectiveLanguageCode,
+            site_id: String(selectedCenterId),
+            site_city: String(selectedCity),
+            hold_id: String(holdId),
+            country_id: 78,
+            accept_declaration: true,
+            info_confirmation: true,
+            practical_confirmation: true,
           },
         });
         const nextReservationId = extractId(data, ["id", "reservation_id", "exam_reservation_id"]);
@@ -1302,6 +1199,27 @@ export default function BookingPage() {
 
   function pickDateFromCalendar(nextDate: string) {
     setAvailableDate(nextDate); setCalendarMonth(nextDate.slice(0, 7)); setIsDatePickerOpen(false);
+  }
+
+  function handleCenterChange(nextCenterId: string) {
+    setSelectedCenterId(nextCenterId);
+    setSessionId("");
+    setSiteId(nextCenterId);
+    setSiteCity(selectedCity);
+    setHoldId("");
+    setHoldExpiresAt("");
+    setReservationId("");
+    setPaymentSession(null);
+    setStatus(nextCenterId ? "Test center selected. Loading center-specific exam sessions." : "");
+  }
+
+  function handleSessionChange(nextSessionId: string) {
+    setSessionId(nextSessionId);
+    setHoldId("");
+    setHoldExpiresAt("");
+    setReservationId("");
+    setPaymentSession(null);
+    if (nextSessionId) setStatus("Exam session selected. Create a live temporary hold before booking.");
   }
 
   const isReschedule = searchParams.get("reschedule") === "1";
@@ -1487,17 +1405,18 @@ export default function BookingPage() {
             </div>
 
             <div className="bk-field">
-              <span className="bk-field-label">Test centre <b>*</b></span>
-              <select value={selectedCenterId} onChange={(e) => setSelectedCenterId(e.target.value)} disabled={!centerOptions.length}>
-                <option value="">{loadingSessions ? "Loading centres…" : "Select test centre"}</option>
-                {centerOptions.map((item) => <option key={item.siteId} value={item.siteId}>{item.name} (Site #{item.siteId})</option>)}
+              <span className="bk-field-label">Live SVP test centre <b>*</b></span>
+              <select value={selectedCenterId} onChange={(e) => handleCenterChange(e.target.value)} disabled={!centerOptions.length}>
+                <option value="">{loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
+                {centerOptions.map((item) => <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}</option>)}
               </select>
+              {selectedCenterOption ? <small className="bk-date-help">Live center: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
             </div>
 
             <div className="bk-field">
-              <span className="bk-field-label">Exam session <b>*</b></span>
-              <select value={sessionId} onChange={(e) => setSessionId(e.target.value)} disabled={!filteredSessions.length}>
-                <option value="">{loadingSessions ? "Loading sessions…" : "Select session"}</option>
+              <span className="bk-field-label">Exam session for selected center <b>*</b></span>
+              <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length}>
+                <option value="">{loadingSessions ? "Loading center-specific sessions…" : "Select session for this center"}</option>
                 {filteredSessions.map((item) => {
                   const sid = getSessionSiteId(item);
                   const realName = getResolvedSessionCenterName(item);
@@ -1546,13 +1465,14 @@ export default function BookingPage() {
             <div className="bk-meta-row"><span>Test centre</span><strong>{selectedSession ? getResolvedSessionCenterName(selectedSession) : (selectedCenterOption?.name || "-")}</strong></div>
             <div className="bk-meta-row"><span>Session status</span><strong>{loadingSeats ? "Loading…" : (sessionDetail?.status || "-")}</strong></div>
             <div className="bk-meta-row"><span>Hold ID</span><strong>{holdId || "-"}</strong></div>
+            <div className="bk-meta-row"><span>Hold expires</span><strong>{holdExpiresAt || "-"}</strong></div>
             <div className="bk-meta-row"><span>Booking no.</span><strong className="bk-highlight">{reservationId || "-"}</strong></div>
           </div>
         </section>
 
         {/* Actions */}
         <section className="bk-actions">
-          <button className="bk-btn bk-btn--ghost" type="button" onClick={createHold} disabled={creatingHold || !sessionId}>
+          <button className="bk-btn bk-btn--ghost" type="button" onClick={createHold} disabled={creatingHold || !selectedCenterId || !sessionId}>
             {creatingHold ? "Creating hold…" : "Create hold"}
           </button>
           {paymentSession ? (
@@ -1565,8 +1485,8 @@ export default function BookingPage() {
               {booking ? "Confirming…" : "Confirm reschedule →"}
             </button>
           ) : (
-            <button className="bk-btn bk-btn--primary" type="button" onClick={bookReservation} disabled={booking || !sessionId}>
-              {booking ? "Confirming…" : "Confirm booking →"}
+            <button className="bk-btn bk-btn--primary" type="button" onClick={bookReservation} disabled={booking || !selectedCenterId || !sessionId || !holdId}>
+              {booking ? "Confirming…" : holdId ? "Confirm booking →" : "Create hold before booking"}
             </button>
           )}
         </section>

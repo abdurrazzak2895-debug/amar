@@ -482,6 +482,67 @@ function buildPath(basePath: string, queryString: string): string {
   return suffix ? `${basePath}?${suffix}` : basePath;
 }
 
+const SVP_COUNTRY_ID = "78";
+
+function normalizeCityName(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function normalizeTestCenter(center: any) {
+  const id = center?.test_center_id ?? center?.id ?? center?.site_id ?? center?.site?.id ?? "";
+  const name = center?.test_center_name || center?.name || center?.site?.name || "";
+  const city = normalizeCityName(
+    center?.city || center?.test_center_city || center?.address?.locality || center?.address?.city
+  );
+  return {
+    ...center,
+    id: id === "" ? "" : String(id),
+    test_center_id: id === "" ? "" : String(id),
+    name: String(name || "").trim(),
+    test_center_name: String(name || "").trim(),
+    city,
+    test_center_city: city,
+  };
+}
+
+function extractTestCenters(payload: any): any[] {
+  const values = payload?.test_centers || payload?.centers || payload?.data?.test_centers || payload?.data?.centers || payload?.data;
+  return Array.isArray(values) ? values : [];
+}
+
+function extractCities(payload: any): string[] {
+  const values = payload?.cities || payload?.data?.cities || payload?.data || [];
+  if (!Array.isArray(values)) return [];
+  return Array.from(new Set(values.map((item: any) => normalizeCityName(
+    typeof item === "string" ? item : item?.city || item?.name || item?.english_name
+  )).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function extractSessions(payload: any): any[] {
+  const values = payload?.exam_sessions || payload?.sessions || payload?.data?.exam_sessions || payload?.data?.sessions || payload?.data;
+  return Array.isArray(values) ? values : [];
+}
+
+function enrichSessionsForCenter(sessions: any[], center: any, testCenterId: string, city: string) {
+  const normalizedCenter = normalizeTestCenter(center || { id: testCenterId, city });
+  return sessions.map((session: any) => ({
+    ...session,
+    site_id: normalizedCenter.test_center_id || testCenterId,
+    test_center_id: normalizedCenter.test_center_id || testCenterId,
+    test_center_name: normalizedCenter.test_center_name || session?.test_center_name || "",
+    site_city: normalizedCenter.city || session?.site_city || city,
+    test_center: {
+      ...(session?.test_center || {}),
+      id: normalizedCenter.id || session?.test_center?.id || testCenterId,
+      test_center_id: normalizedCenter.test_center_id || session?.test_center?.test_center_id || testCenterId,
+      name: normalizedCenter.name || session?.test_center?.name || session?.test_center?.test_center_name || "",
+      test_center_name: normalizedCenter.test_center_name || session?.test_center?.test_center_name || session?.test_center?.name || "",
+      city: normalizedCenter.city || session?.test_center?.city || session?.test_center?.test_center_city || city,
+      test_center_city: normalizedCenter.city || session?.test_center?.test_center_city || session?.test_center?.city || city,
+    },
+  }));
+}
+
 // ── Main handler ────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -502,9 +563,13 @@ Deno.serve(async (req) => {
         "/api/v1/individual_labor_space/available_dates",
         "/api/v1/individual_labor_space/available-dates",
       ];
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      params.set("country_id", params.get("country_id") || SVP_COUNTRY_ID);
+      params.set("per_page", params.get("per_page") || "10000");
       for (let i = 0; i < paths.length; i++) {
         try {
-          const data = await svpFetch(buildPath(paths[i], query), { method: "GET", token: svpToken });
+          const data = await svpFetch(buildPath(paths[i], params.toString()), { method: "GET", token: svpToken });
           return json(data);
         } catch (err: any) {
           if (err?.statusCode !== 404) throw err;
@@ -513,8 +578,6 @@ Deno.serve(async (req) => {
 
       // The official SVP date routes are not consistently available. Use the
       // corresponding t2hub calendar endpoint when all of them return 404.
-      const params = new URLSearchParams(query);
-      params.delete("locale");
       return json(await t2hubFetch(t2hubQuery("/exam-available-dates", params)));
     }
 
@@ -532,6 +595,38 @@ Deno.serve(async (req) => {
         params.delete("locale");
         return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params)));
       }
+    }
+
+    // ── Live SVP cities and test centers ─────────────────────
+    if (req.method === "GET" && path === "/cities") {
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      params.set("country_id", params.get("country_id") || SVP_COUNTRY_ID);
+      params.set("per_page", params.get("per_page") || "10000");
+      const data = await svpFetch(buildPath("/api/v1/individual_labor_space/test_centers/cities", params.toString()), {
+        method: "GET",
+        token: svpToken,
+      });
+      const cities = extractCities(data);
+      return json({ cities, data: cities });
+    }
+
+    if (req.method === "GET" && path === "/test-centers") {
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      params.set("country_id", params.get("country_id") || SVP_COUNTRY_ID);
+      params.set("per_page", params.get("per_page") || "10000");
+      const requestedCity = normalizeCityName(params.get("city"));
+      params.delete("city");
+      const data = await svpFetch(buildPath("/api/v1/visitor_space/test_centers", params.toString()), {
+        method: "GET",
+        token: svpToken,
+      });
+      const centers = extractTestCenters(data)
+        .map(normalizeTestCenter)
+        .filter((center: any) => !requestedCity || String(center.city).toLowerCase() === requestedCity.toLowerCase())
+        .filter((center: any) => center.test_center_id && center.test_center_name);
+      return json({ test_centers: centers, centers, city: requestedCity });
     }
 
     // ── t2hub city test centers ──────────────────────────────
@@ -599,6 +694,57 @@ Deno.serve(async (req) => {
         .map((item: any) => normalizeT2HubSession(item, centerByName));
 
       return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
+    }
+
+    // ── Strict center-scoped live SVP exam sessions ───────────
+    if (req.method === "GET" && path === "/exam-sessions") {
+      const params = new URLSearchParams(query);
+      const categoryId = params.get("category_id") || "";
+      const city = normalizeCityName(params.get("city"));
+      const examDate = params.get("exam_date") || params.get("test_date") || "";
+      const testCenterId = params.get("test_center_id") || "";
+      if (categoryId && city && examDate && testCenterId) {
+        params.delete("locale");
+        params.delete("test_date");
+        params.set("exam_date", examDate);
+        params.set("available_seats", "greater_than::0");
+
+        const [sessionPayload, centerPayload] = await Promise.all([
+          svpFetch(buildPath("/api/v1/individual_labor_space/exam_sessions", params.toString()), {
+            method: "GET",
+            token: svpToken,
+          }),
+          svpFetch(buildPath("/api/v1/visitor_space/test_centers", new URLSearchParams({
+            category_id: categoryId,
+            country_id: SVP_COUNTRY_ID,
+            per_page: "10000",
+          }).toString()), { method: "GET", token: svpToken }),
+        ]);
+
+        const centers = extractTestCenters(centerPayload).map(normalizeTestCenter);
+        const selectedCenter = centers.find((center: any) =>
+          String(center.test_center_id) === String(testCenterId) &&
+          (!center.city || center.city.toLowerCase() === city.toLowerCase())
+        );
+        const rawSessions = extractSessions(sessionPayload);
+        const sessions = rawSessions
+          .filter((session: any) => {
+            const sessionCenterId = session?.test_center_id ?? session?.test_center?.test_center_id ?? session?.test_center?.id ?? session?.site_id;
+            return sessionCenterId == null || String(sessionCenterId) === String(testCenterId);
+          })
+          .map((session: any) => enrichSessionsForCenter(rawSessions.length ? [session] : [], selectedCenter, testCenterId, city)[0]);
+
+        return json({
+          ...((sessionPayload && typeof sessionPayload === "object" && !Array.isArray(sessionPayload)) ? sessionPayload : {}),
+          exam_sessions: sessions,
+          sessions,
+          test_center: selectedCenter || null,
+          test_center_id: String(testCenterId),
+          test_center_name: selectedCenter?.test_center_name || "",
+          city,
+          exam_date: examDate,
+        });
+      }
     }
 
     // ── Exam sessions (enriched with available_seats) ────────
@@ -703,6 +849,28 @@ Deno.serve(async (req) => {
       const headers: Record<string, string> = { ...corsHeaders, "Content-Type": contentType };
       if (disposition) headers["Content-Disposition"] = disposition;
       return new Response(await upstream.arrayBuffer(), { status: 200, headers });
+    }
+
+    // ── Center-bound temporary seat hold ─────────────────────
+    if (req.method === "POST" && path === "/temporary-seats") {
+      const body = await req.json().catch(() => ({}));
+      const examSessionId = body?.exam_session_id;
+      const testCenterId = body?.test_center_id;
+      if (examSessionId === undefined || examSessionId === null || examSessionId === "") {
+        throw { statusCode: 400, message: "Missing exam_session_id" };
+      }
+      if (testCenterId === undefined || testCenterId === null || testCenterId === "") {
+        throw { statusCode: 400, message: "Missing test_center_id" };
+      }
+      const data = await svpFetch("/api/v1/individual_labor_space/temporary_seats", {
+        method: "POST",
+        token: svpToken,
+        body: {
+          exam_session_id: examSessionId,
+          test_center_id: testCenterId,
+        },
+      });
+      return json(data);
     }
 
     // ── Standard routes ──────────────────────────────────────
