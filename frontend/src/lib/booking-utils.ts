@@ -23,6 +23,50 @@ export function pickArray(payload: any): any[] {
   return [];
 }
 
+export const VERIFIED_DHAKA_CENTER_ROSTER = [
+  { siteId: "403", name: "Arkan Al-Taameer for professional classification - Dhaka", city: "Dhaka" },
+  { siteId: "223", name: "Manikganj Technical Training Center", city: "Dhaka" },
+  { siteId: "220", name: "Kishoreganj Technical Training Centre", city: "Dhaka" },
+  { siteId: "218", name: "Narsingdi Technical Training Center", city: "Dhaka" },
+  { siteId: "102", name: "Tangail Technical Training Center", city: "Dhaka" },
+  { siteId: "45", name: "Bangladesh German TTC", city: "Dhaka" },
+  { siteId: "17", name: "Bangladesh Korea TTC Dhaka", city: "Dhaka" },
+] as const;
+
+/**
+ * Restrict the Dhaka selector to the seven SVP centre IDs verified by the
+ * user-provided live response. Missing rows are backfilled with the verified
+ * names so an older proxy deployment cannot hide a real centre; date-scoped
+ * session checks still decide whether each row is selectable for a date.
+ */
+export function mergeVerifiedCityCenterRoster<T extends Record<string, any>>(
+  centers: T[],
+  city: string,
+  countryId: string | number = "78",
+): T[] {
+  const isDhakaBangladesh = String(city || "").trim().toLowerCase() === "dhaka" && String(countryId) === "78";
+  if (!isDhakaBangladesh) return centers;
+
+  const bySiteId = new Map<string, T>();
+  centers.forEach((center) => {
+    const siteId = String(center?.test_center_id ?? center?.id ?? center?.site_id ?? "").trim();
+    if (siteId) bySiteId.set(siteId, center);
+  });
+
+  return VERIFIED_DHAKA_CENTER_ROSTER.map((verified) => {
+    const live = bySiteId.get(verified.siteId);
+    if (live) return live;
+    return {
+      test_center_id: verified.siteId,
+      id: Number(verified.siteId),
+      test_center_name: verified.name,
+      name: verified.name,
+      city: verified.city,
+      country_id: 78,
+    } as T;
+  });
+}
+
 export function normalizeDateValue(value: string): string {
   if (!value) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;

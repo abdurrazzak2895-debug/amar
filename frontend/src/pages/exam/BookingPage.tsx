@@ -11,6 +11,7 @@ import {
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
   getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
   filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
+  mergeVerifiedCityCenterRoster,
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
@@ -689,7 +690,8 @@ export default function BookingPage() {
         const data: any = await api(`/test-centers?${params.toString()}`);
         if (!active) return;
         const rawCenters = Array.isArray(data?.test_centers) ? data.test_centers : pickArray(data);
-        const normalized = rawCenters.map((center: any) => ({
+        const verifiedCenters = mergeVerifiedCityCenterRoster(rawCenters, selectedCity, "78");
+        const normalized = verifiedCenters.map((center: any) => ({
           siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
           name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
           city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
@@ -733,7 +735,8 @@ export default function BookingPage() {
           : Array.isArray(centerPayload?.centers)
             ? centerPayload.centers
             : pickArray(centerPayload);
-        const rawCenters: any[] = await Promise.all(centers.map(async (center: any) => {
+        const verifiedCenters = mergeVerifiedCityCenterRoster(centers, selectedCity, "78");
+        const rawCenters: any[] = await Promise.all(verifiedCenters.map(async (center: any) => {
           const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
           if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
           try {

@@ -5,6 +5,8 @@ import {
   getSessionCenterName,
   getSessionSiteId,
   getCenterKey,
+  VERIFIED_DHAKA_CENTER_ROSTER,
+  mergeVerifiedCityCenterRoster,
 } from "./booking-utils";
 
 describe("booking-utils center name resolution", () => {
@@ -94,6 +96,26 @@ describe("booking-utils center name resolution", () => {
     expect(byKey[getCenterKey(sessionFlat)].city).toBe("Rajshahi");
     expect(byKey[getCenterKey(sessionNestedId)].name).toBe("Dhaka Skills Center");
     expect(byKey[getCenterKey(sessionFallback)].city).toBe("Chittagong");
+  });
+
+  it("restricts Dhaka to the seven verified SVP centre IDs and backfills missing live rows", () => {
+    const result = mergeVerifiedCityCenterRoster([
+      { id: 403, name: "Arkan Al-Taameer for professional classification - Dhaka" },
+      { id: 999, name: "Stale centre that must not appear" },
+      { id: 45, name: "Bangladesh German TTC" },
+    ], "Dhaka", 78);
+
+    expect(result.map((item) => String(item.id ?? item.test_center_id))).toEqual(
+      VERIFIED_DHAKA_CENTER_ROSTER.map((item) => item.siteId),
+    );
+    expect(result).toHaveLength(7);
+    expect(result.map((item) => item.name)).toContain("Bangladesh Korea TTC Dhaka");
+    expect(result.map((item) => item.name)).not.toContain("Stale centre that must not appear");
+  });
+
+  it("does not alter non-Dhaka centre rosters", () => {
+    const centres = [{ id: 180, name: "Madaripur Technical Training Centre", city: "Barishal" }];
+    expect(mergeVerifiedCityCenterRoster(centres, "Barishal", 78)).toEqual(centres);
   });
 
   it("removes centres with no sessions for the selected date", () => {
