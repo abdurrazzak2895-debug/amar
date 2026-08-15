@@ -9,7 +9,7 @@ import {
   pickArray, normalizeOccupation, normalizeDateValue,
   normalizeAvailableDateEntries, getSessionId, getSessionSiteId, getSessionSiteCity,
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
-  getSessionPayloadId, buildExamReservationPayload,
+  getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
   buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
 } from "@/lib/booking-utils";
@@ -603,14 +603,13 @@ export default function BookingPage() {
     setCalendarMonth(availableDates[0] ? availableDates[0].slice(0, 7) : normalizeDateValue(new Date().toISOString()).slice(0, 7));
   }, [availableDates]);
 
-  // A date change creates a new center/session context. Clear all downstream
-  // selections and the previous hold before requesting center-specific sessions.
+  // A date change keeps the explicitly selected center, then clears only the
+  // downstream session/hold state. The session effect below re-queries the same
+  // real center for the new date; an empty result must stay empty.
   useEffect(() => {
     setSessions([]);
-    setCityCenterOptions([]);
-    setSelectedCenterId("");
     setSessionId("");
-    setSiteId("");
+    setSiteId(selectedCenterId || "");
     setSiteCity(selectedCity || "");
     setHoldId("");
     setHoldExpiresAt("");
@@ -703,10 +702,7 @@ export default function BookingPage() {
         const data: any = await api(`/exam-sessions?${params.toString()}`);
         if (!active) return;
         const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
-        setSessions(liveSessions.filter((session: any) => {
-          const centerId = getSessionSiteId(session);
-          return !centerId || String(centerId) === String(selectedCenterId);
-        }));
+        setSessions(filterSessionsForCenter(liveSessions, selectedCenterId));
       } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load center-specific exam sessions"); }
       finally { if (active) setLoadingSessions(false); }
     })();

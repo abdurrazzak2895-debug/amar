@@ -79,25 +79,31 @@ export function getSessionId(item: any): string {
 }
 
 export function getSessionSiteId(item: any): string {
+  const nested = item?.exam_session || item?.data?.exam_session || {};
+  const center = item?.test_center || nested?.test_center || {};
   return String(
     item?.site_id ||
-    item?.test_center?.site_id ||
-    item?.test_center?.id ||
-    item?.test_center?.test_center_id ||
+    nested?.site_id ||
+    center?.site_id ||
+    center?.id ||
+    center?.test_center_id ||
     item?.test_center_id ||
+    nested?.test_center_id ||
     item?.site?.id ||
+    nested?.site?.id ||
     ""
   );
 }
 
 export function getSessionSiteCity(item: any): string {
-  const sc = item?.site_city;
-  const tc = item?.test_center;
+  const nested = item?.exam_session || item?.data?.exam_session || {};
+  const sc = item?.site_city ?? nested?.site_city;
+  const tc = item?.test_center || nested?.test_center;
   // Support both legacy SVP shape (test_center.city) and new SVP shape (test_center.test_center_city)
   return String(
     (typeof sc === "object" ? sc?.name || sc?.city || sc?.english_name : sc) ||
     tc?.test_center_city || tc?.city ||
-    item?.city || item?.site_city_name || item?.test_center_city || ""
+    item?.city || nested?.city || item?.site_city_name || item?.test_center_city || ""
   );
 }
 
@@ -109,6 +115,15 @@ export function getSessionPayloadId(value: string | number): number | string | n
     return numeric > 0 ? numeric : null;
   }
   return raw;
+}
+
+export function filterSessionsForCenter(sessions: any[], centerId: string | number): any[] {
+  const expected = String(centerId || "").trim();
+  if (!expected) return [];
+  return sessions.filter((session: any) => {
+    const actual = String(getSessionSiteId(session) || "").trim();
+    return actual !== "" && actual === expected;
+  });
 }
 
 /**
