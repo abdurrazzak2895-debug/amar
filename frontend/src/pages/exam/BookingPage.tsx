@@ -679,9 +679,12 @@ export default function BookingPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!selectedCity || !categoryId) { setCityCenterOptions([]); return; }
+      if (!selectedCity) { setCityCenterOptions([]); return; }
       try {
-        const params = new URLSearchParams({ category_id: String(categoryId), city: String(selectedCity) });
+        // The centre roster is city/country scoped, not occupation scoped.
+        // Category filtering belongs to the exam-session availability query;
+        // including category_id here incorrectly hides valid city centres.
+        const params = new URLSearchParams({ city: String(selectedCity), country_id: "78" });
         const data: any = await api(`/test-centers?${params.toString()}`);
         if (!active) return;
         const rawCenters = Array.isArray(data?.test_centers) ? data.test_centers : pickArray(data);
@@ -698,7 +701,7 @@ export default function BookingPage() {
       }
     })();
     return () => { active = false; };
-  }, [selectedCity, categoryId]);
+  }, [selectedCity]);
 
   // The available-dates endpoint is city-level. Before the user chooses a
   // centre, check every real centre for the selected date and retain only
@@ -713,19 +716,14 @@ export default function BookingPage() {
       }
       setLoadingCenterAvailability(true);
       try {
-        const params = new URLSearchParams({
-          category_id: String(categoryId),
-          city: String(selectedCity),
-          exam_date: availableDate,
-        });
-
         // Use the official centre-scoped session route directly. The optimized
         // `/center-session-availability` route is optional server-side code and
         // may not be deployed with the frontend; a missing route must never be
         // interpreted as zero availability. Each centre is therefore checked
         // independently through the already-live `/exam-sessions` contract.
+        // Load the complete city centre roster first; occupation category is
+        // applied only when checking each centre's date-scoped sessions.
         const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
-          category_id: String(categoryId),
           city: String(selectedCity),
           country_id: "78",
         }).toString()}`);

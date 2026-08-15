@@ -650,6 +650,10 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && path === "/test-centers") {
       const params = new URLSearchParams(query);
       params.delete("locale");
+      // A test-centre roster is city/country scoped. Occupation/category
+      // filtering belongs to exam-session availability, not centre discovery;
+      // forwarding category_id here can incorrectly hide valid centres.
+      params.delete("category_id");
       params.set("country_id", params.get("country_id") || SVP_COUNTRY_ID);
       params.set("per_page", params.get("per_page") || "10000");
       const requestedCity = normalizeCityName(params.get("city"));
