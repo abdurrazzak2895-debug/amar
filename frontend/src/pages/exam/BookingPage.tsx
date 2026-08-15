@@ -14,6 +14,7 @@ import {
   filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   mergeVerifiedCityCenterRoster,
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
+  isNoExamSession422,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
@@ -54,6 +55,8 @@ export default function BookingPage() {
   const [loadingOccupations, setLoadingOccupations] = useState(false);
   const [loadingDates, setLoadingDates] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessionReloadKey, setSessionReloadKey] = useState(0);
+  const [sessionRetryNotice, setSessionRetryNotice] = useState("");
   const [creatingHold, setCreatingHold] = useState(false);
   const [booking, setBooking] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
@@ -780,9 +783,11 @@ export default function BookingPage() {
   // the key protection against mixing several centers in one city.
   useEffect(() => {
     let active = true;
+    const retryNotice = sessionRetryNotice;
     (async () => {
       if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
-      setLoadingSessions(true); setError("");
+      setLoadingSessions(true);
+      if (!retryNotice) setError("");
       try {
         const params = new URLSearchParams({
           category_id: String(categoryId),
@@ -794,11 +799,16 @@ export default function BookingPage() {
         if (!active) return;
         const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
         setSessions(filterSessionsForCenter(liveSessions, selectedCenterId));
-      } catch (err: any) { if (!active) return; setSessions([]); setError(err?.message || "Failed to load center-specific exam sessions"); }
+        setSessionRetryNotice("");
+      } catch (err: any) {
+        if (!active) return;
+        setSessions([]);
+        if (!retryNotice) setError(err?.message || "Failed to load center-specific exam sessions");
+      }
       finally { if (active) setLoadingSessions(false); }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId, selectedCenterId]);
+  }, [selectedCity, availableDate, categoryId, selectedCenterId, sessionReloadKey]);
 
   // Legacy local center mappings are intentionally not used for the live SVP
   // selection path. The live proxy enriches every center-scoped session with
@@ -1118,6 +1128,28 @@ export default function BookingPage() {
     }
   }
 
+  function recoverFromNoExamSession422(error: any): boolean {
+    if (!isNoExamSession422(error)) return false;
+    const centerName = selectedCenterOption?.name || `site ${selectedCenterId}`;
+    setSessionId("");
+    setSessions([]);
+    setSessionDetail(null);
+    setSessionCenterConflict(null);
+    setLiveAvailableSeats(null);
+    setHoldId("");
+    setHoldExpiresAt("");
+    setReservationId("");
+    setPaymentSession(null);
+    setStatus("");
+    setSessionReloadKey((value) => value + 1);
+    const retryMessage =
+      `SVP no longer has an available exam session at ${centerName} for ${availableDate || "the selected date"}. ` +
+      "The old session was cleared. Choose a fresh session for this same centre and date; no other centre will be booked.";
+    setSessionRetryNotice(retryMessage);
+    setError(retryMessage);
+    return true;
+  }
+
   async function createHold() {
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     // Only hold the SELECTED session, not every session in the city.
@@ -1150,7 +1182,9 @@ export default function BookingPage() {
       setSiteId(String(selectedCenterId));
       setSiteCity(String(selectedCity));
       setStatus(nextHoldId ? `Hold created for ${selectedCenterOption?.name || `center #${selectedCenterId}`}: #${nextHoldId}` : "Hold created");
-    } catch (err: any) { setError(err?.message || "Failed to create hold"); }
+    } catch (err: any) {
+      if (!recoverFromNoExamSession422(err)) setError(err?.message || "Failed to create hold");
+    }
     finally { setCreatingHold(false); }
   }
 
@@ -1162,7 +1196,10 @@ export default function BookingPage() {
     if (selectedSessionPayloadId === null) { setError("No valid exam session selected"); return; }
     const selectedSessionIdForApi = String(selectedSessionPayloadId);
     try { await verifySelectedSessionCenter(selectedSessionIdForApi); }
-    catch (err: any) { setError(err?.message || "Selected exam session is not bound to the selected test centre"); return; }
+    catch (err: any) {
+      if (!recoverFromNoExamSession422(err)) setError(err?.message || "Selected exam session is not bound to the selected test centre");
+      return;
+    }
     const sessionCodes = getPrometricCodes(selectedSession);
     const effectiveLanguageCode = languageCode || selectedOccupation?.languageCodes?.[0]?.code || sessionCodes?.[0]?.code || sessionCodes?.[0]?.language_code || "";
     if (!effectiveLanguageCode) { setError("language_code is required. Select a language before booking."); return; }
@@ -1253,7 +1290,9 @@ export default function BookingPage() {
           }
         }
       }
-    } catch (err: any) { setError(err?.message || "Failed to book reservation"); }
+    } catch (err: any) {
+      if (!recoverFromNoExamSession422(err)) setError(err?.message || "Failed to book reservation");
+    }
     finally { setBooking(false); }
   }
 

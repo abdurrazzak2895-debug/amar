@@ -10,6 +10,7 @@ import {
   getResponseCenterIds,
   getResponseCenterName,
   resolveVerifiedResponseCenterId,
+  isNoExamSession422,
 } from "./booking-utils";
 
 describe("booking-utils center name resolution", () => {
@@ -171,5 +172,22 @@ describe("booking-utils center name resolution", () => {
       { siteId: "180", sessionCount: 0 },
       { siteId: "240", sessionCount: 0 },
     ])).toEqual([]);
+  });
+
+  it("classifies SVP no-exam-session 422 details as stale-session errors", () => {
+    expect(isNoExamSession422({
+      status: 422,
+      message: "SVP request failed: 422",
+      data: { details: { message: "test center selected no exam session" } },
+    })).toBe(true);
+    expect(isNoExamSession422({
+      status: 422,
+      message: "Booking validation failed",
+      data: { details: { message: "another centre returned" } },
+    })).toBe(false);
+    expect(isNoExamSession422({
+      status: 409,
+      message: "test center selected no exam session",
+    })).toBe(false);
   });
 });

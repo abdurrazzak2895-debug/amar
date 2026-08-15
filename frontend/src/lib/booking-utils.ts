@@ -23,6 +23,18 @@ export function pickArray(payload: any): any[] {
   return [];
 }
 
+/** True when SVP rejected a 422 because the selected session is no longer usable. */
+export function isNoExamSession422(error: any): boolean {
+  const details = error?.data?.details;
+  const fragments = [
+    error?.message,
+    error?.data?.message,
+    error?.data?.error,
+    typeof details === "string" ? details : JSON.stringify(details || ""),
+  ].filter(Boolean).join(" ");
+  return Number(error?.status) === 422 && /no\s+exam\s+session|test\s+center.*no.*session|exam\s+session.*(?:not|unavailable|found)/i.test(fragments);
+}
+
 export const VERIFIED_DHAKA_CENTER_ROSTER = [
   { siteId: "403", name: "Arkan Al-Taameer for professional classification - Dhaka", city: "Dhaka" },
   { siteId: "223", name: "Manikganj Technical Training Center", city: "Dhaka" },
