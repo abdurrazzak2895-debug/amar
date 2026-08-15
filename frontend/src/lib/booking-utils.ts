@@ -95,6 +95,54 @@ export function getSessionSiteId(item: any): string {
   );
 }
 
+/**
+ * Verify a selected session's centre without weakening the wrong-centre guard.
+ *
+ * Some live SVP detail responses contain only a city-level test_center object,
+ * while the centre-scoped list response already carries the authoritative
+ * site_id/test_center_id. In that specific case, the list row may be used as a
+ * fallback only when it is the same session ID and already matches the selected
+ * centre. Any explicit conflicting detail centre ID remains a hard failure.
+ */
+export function resolveVerifiedSessionCenterId(args: {
+  detail: any;
+  selectedSession: any;
+  expectedSessionId: string | number;
+  expectedCenterId: string | number;
+}): string {
+  const expectedSessionId = String(args.expectedSessionId || "").trim();
+  const expectedCenterId = String(args.expectedCenterId || "").trim();
+  if (!expectedSessionId || !expectedCenterId) return "";
+
+  const detailCandidates = [
+    args.detail,
+    args.detail?.exam_session,
+    args.detail?.data,
+    args.detail?.data?.exam_session,
+  ].filter(Boolean);
+  const detailCenterIds = Array.from(new Set(
+    detailCandidates
+      .map((candidate) => String(getSessionSiteId(candidate) || "").trim())
+      .filter(Boolean)
+  ));
+
+  if (detailCenterIds.length === 1) {
+    return detailCenterIds[0] === expectedCenterId ? expectedCenterId : "";
+  }
+  if (detailCenterIds.length > 1) return "";
+
+  const selectedSessionId = String(getSessionId(args.selectedSession) || "").trim();
+  const selectedCenterId = String(getSessionSiteId(args.selectedSession) || "").trim();
+  if (
+    selectedSessionId === expectedSessionId &&
+    selectedCenterId === expectedCenterId
+  ) {
+    return expectedCenterId;
+  }
+
+  return "";
+}
+
 export function getSessionSiteCity(item: any): string {
   const nested = item?.exam_session || item?.data?.exam_session || {};
   const sc = item?.site_city ?? nested?.site_city;

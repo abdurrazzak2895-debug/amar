@@ -11,7 +11,7 @@ import {
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
   getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
   filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
-  formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
+  formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
@@ -1066,7 +1066,13 @@ export default function BookingPage() {
     const detailCenterId = candidates
       .map((candidate) => getSessionSiteId(candidate))
       .find((value) => value != null && String(value).trim() !== "");
-    if (!detailCenterId || String(detailCenterId) !== String(selectedCenterId)) {
+    const verifiedCenterId = resolveVerifiedSessionCenterId({
+      detail,
+      selectedSession,
+      expectedSessionId: selectedSessionPayloadId,
+      expectedCenterId: selectedCenterId,
+    });
+    if (!verifiedCenterId) {
       throw new Error(
         `SVP session centre mismatch: selected site ${selectedCenterId}, session belongs to site ${detailCenterId || "unknown"}`
       );
