@@ -719,44 +719,39 @@ export default function BookingPage() {
           exam_date: availableDate,
         });
 
-        // Prefer the optimized server-side route. The fallback keeps this
-        // frontend compatible with an older deployed proxy while Supabase
-        // function deployment is pending: it makes the same centre-scoped
-        // /exam-sessions requests directly through the existing proxy route.
-        let data: any = null;
-        try {
-          data = await api(`/center-session-availability?${params.toString()}`);
-        } catch {
-          data = null;
-        }
-
-        let rawCenters: any[] | null = Array.isArray(data?.available_centers) ? data.available_centers : null;
-        if (rawCenters === null) {
-          const centerPayload: any = await api(`/test-centers?${new URLSearchParams({ city: String(selectedCity), country_id: "78" }).toString()}`);
-          const centers = Array.isArray(centerPayload?.test_centers)
-            ? centerPayload.test_centers
-            : Array.isArray(centerPayload?.centers)
-              ? centerPayload.centers
-              : pickArray(centerPayload);
-          rawCenters = await Promise.all(centers.map(async (center: any) => {
-            const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
-            if (!siteId) return { ...center, session_count: 0 };
-            try {
-              const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
-                category_id: String(categoryId),
-                city: String(selectedCity),
-                exam_date: availableDate,
-                test_center_id: siteId,
-                country_id: "78",
-                available_seats: "greater_than::0",
-              }).toString()}`);
-              const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
-              return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
-            } catch {
-              return { ...center, session_count: 0, lookup_status: "error" };
-            }
-          }));
-        }
+        // Use the official centre-scoped session route directly. The optimized
+        // `/center-session-availability` route is optional server-side code and
+        // may not be deployed with the frontend; a missing route must never be
+        // interpreted as zero availability. Each centre is therefore checked
+        // independently through the already-live `/exam-sessions` contract.
+        const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
+          category_id: String(categoryId),
+          city: String(selectedCity),
+          country_id: "78",
+        }).toString()}`);
+        const centers = Array.isArray(centerPayload?.test_centers)
+          ? centerPayload.test_centers
+          : Array.isArray(centerPayload?.centers)
+            ? centerPayload.centers
+            : pickArray(centerPayload);
+        const rawCenters: any[] = await Promise.all(centers.map(async (center: any) => {
+          const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
+          if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
+          try {
+            const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
+              category_id: String(categoryId),
+              city: String(selectedCity),
+              exam_date: availableDate,
+              test_center_id: siteId,
+              country_id: "78",
+              available_seats: "greater_than::0",
+            }).toString()}`);
+            const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
+            return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
+          } catch {
+            return { ...center, session_count: 0, lookup_status: "error" };
+          }
+        }));
 
         if (!active) return;
         const normalized = rawCenters.map((center: any) => ({
