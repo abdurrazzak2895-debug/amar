@@ -543,6 +543,36 @@ function enrichSessionsForCenter(sessions: any[], center: any, testCenterId: str
   }));
 }
 
+function rawSessionMatchesCenter(session: any, testCenterId: string): boolean {
+  const sessionCenterId = session?.test_center_id ?? session?.test_center?.test_center_id ??
+    session?.test_center?.id ?? session?.site_id ?? session?.site?.id;
+  return sessionCenterId == null || String(sessionCenterId) === String(testCenterId);
+}
+
+async function fetchOfficialCenterSessions(
+  categoryId: string,
+  city: string,
+  examDate: string,
+  testCenterId: string,
+  token: string,
+): Promise<any[]> {
+  const params = new URLSearchParams({
+    category_id: categoryId,
+    city,
+    exam_date: examDate,
+    test_center_id: testCenterId,
+    country_id: SVP_COUNTRY_ID,
+    available_seats: "greater_than::0",
+    status: "scheduled",
+    per_page: "10000",
+  });
+  const payload = await svpFetch(
+    buildPath("/api/v1/individual_labor_space/exam_sessions", params.toString()),
+    { method: "GET", token },
+  );
+  return extractSessions(payload).filter((session: any) => rawSessionMatchesCenter(session, testCenterId));
+}
+
 // ── Main handler ────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -629,6 +659,58 @@ Deno.serve(async (req) => {
       return json({ test_centers: centers, centers, city: requestedCity });
     }
 
+    // ── Date-scoped centre availability ───────────────────────
+    // The SVP available-dates endpoint is city-level. This route deliberately
+    // checks every real centre for the selected date so the UI never offers a
+    // centre that has no scheduled session on that date.
+    if (req.method === "GET" && path === "/center-session-availability") {
+      const params = new URLSearchParams(query);
+      const categoryId = params.get("category_id") || "";
+      const requestedCity = normalizeCityName(params.get("city"));
+      const examDate = params.get("exam_date") || params.get("test_date") || "";
+      if (!categoryId || !requestedCity || !examDate) {
+        throw { statusCode: 400, message: "Missing category_id, city, or exam_date" };
+      }
+
+      const centerPayload = await svpFetch(buildPath("/api/v1/visitor_space/test_centers", new URLSearchParams({
+        category_id: categoryId,
+        country_id: SVP_COUNTRY_ID,
+        per_page: "10000",
+      }).toString()), { method: "GET", token: svpToken });
+      const centers = extractTestCenters(centerPayload)
+        .map(normalizeTestCenter)
+        .filter((center: any) => String(center.city).toLowerCase() === requestedCity.toLowerCase())
+        .filter((center: any) => center.test_center_id && center.test_center_name);
+
+      const availability = await Promise.all(centers.map(async (center: any) => {
+        const siteId = String(center.test_center_id);
+        try {
+          const sessions = await fetchOfficialCenterSessions(categoryId, requestedCity, examDate, siteId, svpToken);
+          return {
+            ...center,
+            session_count: sessions.length,
+            lookup_status: "ok",
+          };
+        } catch {
+          // An unverified centre is not offered for booking. Returning zero
+          // keeps the UI safe instead of guessing that the city has a session.
+          return {
+            ...center,
+            session_count: 0,
+            lookup_status: "error",
+          };
+        }
+      }));
+
+      return json({
+        city: requestedCity,
+        category_id: categoryId,
+        exam_date: examDate,
+        centers: availability,
+        available_centers: availability.filter((center: any) => center.session_count > 0 && center.lookup_status === "ok"),
+      });
+    }
+
     // ── t2hub city test centers ──────────────────────────────
     if (req.method === "GET" && path === "/t2hub/test-centers") {
       const params = new URLSearchParams(query);
@@ -707,6 +789,7 @@ Deno.serve(async (req) => {
         params.delete("locale");
         params.delete("test_date");
         params.set("exam_date", examDate);
+        params.set("country_id", params.get("country_id") || SVP_COUNTRY_ID);
         params.set("available_seats", "greater_than::0");
 
         const [sessionPayload, centerPayload] = await Promise.all([

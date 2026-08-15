@@ -352,6 +352,15 @@ export function buildCenterOptions(items: any[]): CenterOption[] {
   return Array.from(map.values());
 }
 
+/**
+ * Keep only centres that have a positive live session count for the selected
+ * date. A missing count means the centre endpoint was loaded without a date
+ * scope, so it is retained until date-scoped availability is known.
+ */
+export function filterCentersWithAvailableSessions<T extends { sessionCount?: number | null }>(items: T[]): T[] {
+  return items.filter((item) => item.sessionCount == null || Number(item.sessionCount) > 0);
+}
+
 export interface FallbackCenter {
   siteId: string;
   name: string;

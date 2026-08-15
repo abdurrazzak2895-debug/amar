@@ -10,7 +10,7 @@ import {
   normalizeAvailableDateEntries, getSessionId, getSessionSiteId, getSessionSiteCity,
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
   getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
-  buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
+  filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
@@ -32,6 +32,8 @@ export default function BookingPage() {
   // Section rules — deterministic fallback for sessions whose site_id changes daily.
   const [sectionRules, setSectionRules] = useState<SectionCenterRule[]>([]);
   const [cityCenterOptions, setCityCenterOptions] = useState<{ siteId: string; name: string; city: string }[]>([]);
+  const [dateScopedCenters, setDateScopedCenters] = useState<{ siteId: string; name: string; city: string; sessionCount?: number | null }[] | null>(null);
+  const [loadingCenterAvailability, setLoadingCenterAvailability] = useState(false);
   const [selectedOccupationId, setSelectedOccupationId] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [availableDate, setAvailableDate] = useState("");
@@ -90,6 +92,16 @@ export default function BookingPage() {
     const live = cityCenterOptions
       .filter((center) => !selectedCity || String(center.city).trim().toLowerCase() === String(selectedCity).trim().toLowerCase())
       .filter((center) => center.siteId && center.name);
+
+    // Once the date-scoped lookup completes, only centres with a positive
+    // live session count remain selectable. This prevents a valid city/date
+    // from offering a centre that has no session on that exact date.
+    if (dateScopedCenters !== null) {
+      return filterCentersWithAvailableSessions(dateScopedCenters)
+        .filter((center) => center.siteId && center.name)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     if (live.length) return [...live].sort((a, b) => a.name.localeCompare(b.name));
 
     // If the center endpoint is temporarily unavailable, only use explicit
@@ -98,7 +110,7 @@ export default function BookingPage() {
     return buildCenterOptions(sessionsWithResolvedCenters)
       .filter((center) => center.siteId && !String(center.siteId).startsWith("city:"))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [sessionsWithResolvedCenters, cityCenterOptions, selectedCity]);
+  }, [sessionsWithResolvedCenters, cityCenterOptions, dateScopedCenters, selectedCity]);
   const getResolvedSessionCenterName = (item: any) => {
     // SVP-first: if the session already carries its own real test_center_name
     // (new SVP shape), use that. This guarantees per-session correctness even
@@ -557,12 +569,13 @@ export default function BookingPage() {
     setLanguageCode((prev) => prev || String(selectedOccupation.languageCodes[0]?.code || ""));
     setMethodology(String(selectedOccupation.methodology || "in_person"));
     setSelectedCity(""); setAvailableDate(""); setAvailableDateEntries([]); setLiveCityOptions([]); setSessions([]);
+    setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false);
     setSelectedCenterId(""); setSessionId(""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
   }, [selectedOccupation]);
 
   useEffect(() => {
-    setAvailableDate(""); setSessions([]); setCityCenterOptions([]); setSelectedCenterId(""); setSessionId("");
+    setAvailableDate(""); setSessions([]); setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false); setSelectedCenterId(""); setSessionId("");
     setSiteId(""); setSiteCity(selectedCity || ""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
     if (selectedCity) setStatus(`City selected: ${selectedCity}. Loading sessions for the selected date.`);
@@ -608,6 +621,8 @@ export default function BookingPage() {
   // real center for the new date; an empty result must stay empty.
   useEffect(() => {
     setSessions([]);
+    setDateScopedCenters(null);
+    setLoadingCenterAvailability(false);
     setSessionId("");
     setSiteId(selectedCenterId || "");
     setSiteCity(selectedCity || "");
@@ -684,6 +699,46 @@ export default function BookingPage() {
     })();
     return () => { active = false; };
   }, [selectedCity, categoryId]);
+
+  // The available-dates endpoint is city-level. Before the user chooses a
+  // centre, check every real centre for the selected date and retain only
+  // centres with a positive official SVP session count.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!selectedCity || !availableDate || !categoryId) {
+        setDateScopedCenters(null);
+        setLoadingCenterAvailability(false);
+        return;
+      }
+      setLoadingCenterAvailability(true);
+      try {
+        const params = new URLSearchParams({
+          category_id: String(categoryId),
+          city: String(selectedCity),
+          exam_date: availableDate,
+        });
+        const data: any = await api(`/center-session-availability?${params.toString()}`);
+        if (!active) return;
+        const rawCenters = Array.isArray(data?.available_centers) ? data.available_centers : [];
+        const normalized = rawCenters.map((center: any) => ({
+          siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
+          name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
+          city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
+          sessionCount: Number(center.session_count ?? 0),
+        })).filter((center: any) => center.siteId && center.name);
+        setDateScopedCenters(normalized);
+      } catch (err: any) {
+        if (!active) return;
+        // Do not offer unverified centres after a date-scoped lookup fails.
+        setDateScopedCenters([]);
+        setError(err?.message || "Failed to check centre availability for the selected date");
+      } finally {
+        if (active) setLoadingCenterAvailability(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [selectedCity, availableDate, categoryId]);
 
   // Sessions are always requested with the exact selected center ID. This is
   // the key protection against mixing several centers in one city.
@@ -876,7 +931,7 @@ export default function BookingPage() {
   }, [sessions]);
 
   useEffect(() => {
-    if (!selectedCenterId || !centerOptions.length) return;
+    if (loadingCenterAvailability || !selectedCenterId) return;
     const hasSelected = centerOptions.some((item) => String(item.siteId) === String(selectedCenterId));
     if (!hasSelected) {
       setSelectedCenterId("");
@@ -1393,10 +1448,13 @@ export default function BookingPage() {
 
             <div className="bk-field">
               <span className="bk-field-label">Live SVP test centre <b>*</b></span>
-              <select value={selectedCenterId} onChange={(e) => handleCenterChange(e.target.value)} disabled={!centerOptions.length}>
-                <option value="">{loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
+              <select value={selectedCenterId} onChange={(e) => handleCenterChange(e.target.value)} disabled={!centerOptions.length || loadingCenterAvailability}>
+                <option value="">{loadingCenterAvailability ? "Checking centres for this date…" : loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
                 {centerOptions.map((item) => <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}</option>)}
               </select>
+              {loadingCenterAvailability ? <small className="bk-date-help">Checking official SVP session availability for {formatDateLabel(availableDate)}. Only centres with sessions will remain selectable.</small> : null}
+              {!loadingCenterAvailability && dateScopedCenters !== null && !centerOptions.length ? <small className="bk-error-text">No test centre has an available SVP session for {formatDateLabel(availableDate)} in {selectedCity}. Try another date.</small> : null}
+              {!loadingCenterAvailability && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Only test centres with an available session on the selected date are shown.</small> : null}
               {selectedCenterOption ? <small className="bk-date-help">Live center: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
             </div>
 

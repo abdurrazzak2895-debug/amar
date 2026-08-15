@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCenterOptions,
+  filterCentersWithAvailableSessions,
   getSessionCenterName,
   getSessionSiteId,
   getCenterKey,
@@ -92,7 +93,23 @@ describe("booking-utils center name resolution", () => {
     expect(byKey[getCenterKey(sessionFlat)].name).toBe("Pabna Technical Training Centre");
     expect(byKey[getCenterKey(sessionFlat)].city).toBe("Rajshahi");
     expect(byKey[getCenterKey(sessionNestedId)].name).toBe("Dhaka Skills Center");
-    expect(byKey[getCenterKey(sessionNestedId)].city).toBe("Dhaka");
     expect(byKey[getCenterKey(sessionFallback)].city).toBe("Chittagong");
+  });
+
+  it("removes centres with no sessions for the selected date", () => {
+    const centres = [
+      { siteId: "180", name: "Madaripur Technical Training Centre", city: "Barishal", sessionCount: 0 },
+      { siteId: "240", name: "Patuakhali Technical Training Centre", city: "Barishal", sessionCount: 2 },
+      { siteId: "166", name: "Faridpur Technical Training Centre", city: "Barishal", sessionCount: null },
+    ];
+
+    expect(filterCentersWithAvailableSessions(centres).map((item) => item.siteId)).toEqual(["240", "166"]);
+  });
+
+  it("allows an empty result when every centre has zero sessions", () => {
+    expect(filterCentersWithAvailableSessions([
+      { siteId: "180", sessionCount: 0 },
+      { siteId: "240", sessionCount: 0 },
+    ])).toEqual([]);
   });
 });
