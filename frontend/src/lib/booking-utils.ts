@@ -148,6 +148,43 @@ export function getSessionSiteId(item: any): string {
  * fallback only when it is the same session ID and already matches the selected
  * centre. Any explicit conflicting detail centre ID remains a hard failure.
  */
+function walkResponseNodes(value: any, depth = 0, seen = new Set<any>()): any[] {
+  if (value == null || depth > 5 || typeof value !== "object" || seen.has(value)) return [];
+  seen.add(value);
+  const children = Array.isArray(value) ? value : Object.values(value);
+  return [value, ...children.flatMap((child) => walkResponseNodes(child, depth + 1, seen))];
+}
+
+/**
+ * Extract explicit site/test-centre IDs from a booking or reservation response.
+ * A response that reports any ID other than the selected centre must be treated
+ * as unsafe; a response with no explicit ID is allowed only after the selected
+ * session has already passed the preflight centre guard.
+ */
+export function getResponseCenterIds(payload: any): string[] {
+  return Array.from(new Set(
+    walkResponseNodes(payload)
+      .map((node) => String(getSessionSiteId(node) || "").trim())
+      .filter(Boolean),
+  ));
+}
+
+export function getResponseCenterName(payload: any): string {
+  for (const node of walkResponseNodes(payload)) {
+    const name = getExplicitSessionCenterName(node);
+    if (name) return name;
+  }
+  return "";
+}
+
+export function resolveVerifiedResponseCenterId(payload: any, expectedCenterId: string | number): string {
+  const expected = String(expectedCenterId || "").trim();
+  if (!expected) return "";
+  const ids = getResponseCenterIds(payload);
+  if (ids.some((id) => id !== expected)) return "";
+  return ids.length ? expected : "";
+}
+
 export function resolveVerifiedSessionCenterId(args: {
   detail: any;
   selectedSession: any;

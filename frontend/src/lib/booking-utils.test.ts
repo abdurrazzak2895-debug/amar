@@ -7,6 +7,9 @@ import {
   getCenterKey,
   VERIFIED_DHAKA_CENTER_ROSTER,
   mergeVerifiedCityCenterRoster,
+  getResponseCenterIds,
+  getResponseCenterName,
+  resolveVerifiedResponseCenterId,
 } from "./booking-utils";
 
 describe("booking-utils center name resolution", () => {
@@ -111,6 +114,41 @@ describe("booking-utils center name resolution", () => {
     expect(result).toHaveLength(7);
     expect(result.map((item) => item.name)).toContain("Bangladesh Korea TTC Dhaka");
     expect(result.map((item) => item.name)).not.toContain("Stale centre that must not appear");
+  });
+
+  it("rejects a final response that names another centre", () => {
+    const response = {
+      exam_reservation: {
+        exam_session: {
+          test_center: {
+            id: 45,
+            test_center_id: 45,
+            name: "Bangladesh German TTC",
+            city: "Dhaka",
+          },
+        },
+      },
+    };
+
+    expect(getResponseCenterIds(response)).toEqual(["45"]);
+    expect(getResponseCenterName(response)).toBe("Bangladesh German TTC");
+    expect(resolveVerifiedResponseCenterId(response, "115")).toBe("");
+  });
+
+  it("accepts a final response whose explicit centre matches the selected centre", () => {
+    const response = {
+      reservation: {
+        exam_session: {
+          test_center: {
+            test_center_id: 115,
+            test_center_name: "BRTC Central Training Institute Gazipur",
+            city: "Dhaka",
+          },
+        },
+      },
+    };
+
+    expect(resolveVerifiedResponseCenterId(response, 115)).toBe("115");
   });
 
   it("does not alter non-Dhaka centre rosters", () => {

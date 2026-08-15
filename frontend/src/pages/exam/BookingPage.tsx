@@ -8,8 +8,9 @@ import { extractTestCenterId } from "@/lib/test-centers";
 import {
   pickArray, normalizeOccupation, normalizeDateValue,
   normalizeAvailableDateEntries, getSessionId, getSessionSiteId, getSessionSiteCity,
-  getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
+  getSessionCenterName, getExplicitSessionCenterName, getCenterKey,   getPrometricCodes, extractId,
   getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
+  getResponseCenterIds, getResponseCenterName, resolveVerifiedResponseCenterId,
   filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   mergeVerifiedCityCenterRoster,
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
@@ -1104,6 +1105,19 @@ export default function BookingPage() {
     return detail;
   }
 
+  function assertResponseMatchesSelectedCenter(payload: any, responseLabel: string) {
+    const expectedCenterId = String(selectedCenterId || "").trim();
+    const responseCenterIds = getResponseCenterIds(payload);
+    const verifiedCenterId = resolveVerifiedResponseCenterId(payload, expectedCenterId);
+    if (responseCenterIds.length && !verifiedCenterId) {
+      const actualCenterId = responseCenterIds.find((id) => id !== expectedCenterId) || responseCenterIds[0];
+      const actualName = getResponseCenterName(payload) || `site ${actualCenterId}`;
+      throw new Error(
+        `Booking blocked: ${responseLabel} returned ${actualName} (site ${actualCenterId}), but the selected centre is site ${expectedCenterId}. No other centre will be booked.`
+      );
+    }
+  }
+
   async function createHold() {
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     // Only hold the SELECTED session, not every session in the city.
@@ -1125,6 +1139,7 @@ export default function BookingPage() {
           test_center_id: String(selectedCenterId),
         },
       });
+      assertResponseMatchesSelectedCenter(data, "temporary hold response");
       const nextHoldId = extractId(data, ["id", "hold_id", "temporary_seat_id"]);
       const nextExpiry = String(
         data?.expired_at || data?.expires_at || data?.temporary_seat?.expired_at ||
@@ -1183,6 +1198,7 @@ export default function BookingPage() {
             language_code: rescheduleLanguageCode,
           },
         });
+        assertResponseMatchesSelectedCenter(data, "reschedule response");
         const nextReservationId = extractId(data, ["id", "reservation_id", "exam_reservation_id"]) || oldReservationId;
         setReservationId(String(nextReservationId || ""));
         setStatus(`Reservation rescheduled successfully: #${nextReservationId}`);
@@ -1206,6 +1222,7 @@ export default function BookingPage() {
             practical_confirmation: true,
           },
         });
+        assertResponseMatchesSelectedCenter(data, "reservation response");
         const nextReservationId = extractId(data, ["id", "reservation_id", "exam_reservation_id"]);
         setReservationId(String(nextReservationId || ""));
         // Update live seats from response if present
