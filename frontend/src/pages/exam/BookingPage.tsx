@@ -718,9 +718,47 @@ export default function BookingPage() {
           city: String(selectedCity),
           exam_date: availableDate,
         });
-        const data: any = await api(`/center-session-availability?${params.toString()}`);
+
+        // Prefer the optimized server-side route. The fallback keeps this
+        // frontend compatible with an older deployed proxy while Supabase
+        // function deployment is pending: it makes the same centre-scoped
+        // /exam-sessions requests directly through the existing proxy route.
+        let data: any = null;
+        try {
+          data = await api(`/center-session-availability?${params.toString()}`);
+        } catch {
+          data = null;
+        }
+
+        let rawCenters: any[] | null = Array.isArray(data?.available_centers) ? data.available_centers : null;
+        if (rawCenters === null) {
+          const centerPayload: any = await api(`/test-centers?${new URLSearchParams({ city: String(selectedCity), country_id: "78" }).toString()}`);
+          const centers = Array.isArray(centerPayload?.test_centers)
+            ? centerPayload.test_centers
+            : Array.isArray(centerPayload?.centers)
+              ? centerPayload.centers
+              : pickArray(centerPayload);
+          rawCenters = await Promise.all(centers.map(async (center: any) => {
+            const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
+            if (!siteId) return { ...center, session_count: 0 };
+            try {
+              const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
+                category_id: String(categoryId),
+                city: String(selectedCity),
+                exam_date: availableDate,
+                test_center_id: siteId,
+                country_id: "78",
+                available_seats: "greater_than::0",
+              }).toString()}`);
+              const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
+              return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
+            } catch {
+              return { ...center, session_count: 0, lookup_status: "error" };
+            }
+          }));
+        }
+
         if (!active) return;
-        const rawCenters = Array.isArray(data?.available_centers) ? data.available_centers : [];
         const normalized = rawCenters.map((center: any) => ({
           siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
           name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
@@ -730,7 +768,7 @@ export default function BookingPage() {
         setDateScopedCenters(normalized);
       } catch (err: any) {
         if (!active) return;
-        // Do not offer unverified centres after a date-scoped lookup fails.
+        // Do not offer unverified centres after both lookup paths fail.
         setDateScopedCenters([]);
         setError(err?.message || "Failed to check centre availability for the selected date");
       } finally {
