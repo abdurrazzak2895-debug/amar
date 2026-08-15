@@ -1,6 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verify } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 import { getReservationBillingOperation } from "./billing-utils.ts";
+import {
+  buildReservationCollectionQuery,
+  filterReservationRows,
+  getReservationLookupId,
+  reshapeReservationPayload,
+} from "./reservation-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1002,7 +1008,31 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const data: any = await svpFetch(buildPath(svpPath, query), { method: route.method, token: svpToken, body });
+        const reservationLookupId = route.method === "GET" && /^\/exam-reservations(?:\/[^/]+)?$/.test(path)
+          ? getReservationLookupId(path, query)
+          : "";
+        let data: any;
+        if (route.method === "GET" && path === "/exam-reservations" && reservationLookupId) {
+          const collectionPayload = await svpFetch(
+            buildPath(svpPath, buildReservationCollectionQuery(query)),
+            { method: route.method, token: svpToken },
+          );
+          const matchingRows = filterReservationRows(collectionPayload, reservationLookupId);
+          if (!matchingRows.length) {
+            throw {
+              statusCode: 404,
+              message: "Reservation not found",
+              details: { reservation_id: reservationLookupId },
+            };
+          }
+          data = reshapeReservationPayload(collectionPayload, matchingRows);
+        } else {
+          data = await svpFetch(buildPath(svpPath, query), {
+            method: route.method,
+            token: svpToken,
+            body,
+          });
+        }
         if (isChargeableBooking && accessContext?.account.permission_mode === "MANAGED") {
           const reservationId = findReservationId(data) ||
             (isBookingReschedule ? String(match[1]) : `svp-success:${req.headers.get("x-request-id") || walletHoldId}`);
