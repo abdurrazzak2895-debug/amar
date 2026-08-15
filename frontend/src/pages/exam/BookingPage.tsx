@@ -1507,13 +1507,18 @@ export default function BookingPage() {
               {loadingCenterAvailability ? <small className="bk-date-help">Checking official SVP session availability for {formatDateLabel(availableDate)}. Only centres with sessions will remain selectable.</small> : null}
               {!loadingCenterAvailability && dateScopedCenters !== null && !centerOptions.length ? <small className="bk-error-text">No test centre has an available SVP session for {formatDateLabel(availableDate)} in {selectedCity}. Try another date.</small> : null}
               {!loadingCenterAvailability && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Only test centres with an available session on the selected date are shown.</small> : null}
-              {selectedCenterOption ? <small className="bk-date-help">Live center: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
+              {selectedCenterOption ? <small className="bk-date-help">Live centre: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
+              {selectedCenterOption && availableDate ? (
+                <small className="bk-date-help">
+                  Selected-centre only: a seat can be secured only at {selectedCenterOption.name} on {formatDateLabel(availableDate)}. If that centre has no session on this date, booking stops—no other centre or session is substituted.
+                </small>
+              ) : null}
             </div>
 
             <div className="bk-field">
-              <span className="bk-field-label">Exam session for selected center <b>*</b></span>
-              <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length}>
-                <option value="">{loadingSessions ? "Loading center-specific sessions…" : "Select session for this center"}</option>
+              <span className="bk-field-label">Available sessions at the selected centre <b>*</b></span>
+              <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length} aria-label="Available sessions at the selected centre">
+                <option value="">{loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
                 {filteredSessions.map((item) => {
                   const sid = getSessionSiteId(item);
                   const realName = getResolvedSessionCenterName(item);
