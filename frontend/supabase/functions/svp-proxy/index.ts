@@ -1012,7 +1012,7 @@ Deno.serve(async (req) => {
           ? getReservationLookupId(path, query)
           : "";
         let data: any;
-        if (route.method === "GET" && path === "/exam-reservations" && reservationLookupId) {
+        if (route.method === "GET" && /^\/exam-reservations(?:\/[^/]+)?$/.test(path) && reservationLookupId) {
           const collectionPayload = await svpFetch(
             buildPath(svpPath, buildReservationCollectionQuery(query)),
             { method: route.method, token: svpToken },
