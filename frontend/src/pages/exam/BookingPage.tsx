@@ -63,6 +63,7 @@ export default function BookingPage() {
   const [liveAvailableSeats, setLiveAvailableSeats] = useState<number | null>(null);
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [sessionDetail, setSessionDetail] = useState<any>(null);
+  const [sessionCenterConflict, setSessionCenterConflict] = useState<{ expectedId: string; actualId: string; actualName: string; sessionId: string } | null>(null);
   const [occupationSearch, setOccupationSearch] = useState("");
   const [isOccupationOpen, setIsOccupationOpen] = useState(false);
   const occupationRef = useRef<HTMLDivElement>(null);
@@ -997,7 +998,14 @@ export default function BookingPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!sessionId) { setLiveAvailableSeats(null); setLoadingSeats(false); setSessionDetail(null); return; }
+      if (!sessionId) {
+        setLiveAvailableSeats(null);
+        setLoadingSeats(false);
+        setSessionDetail(null);
+        setSessionCenterConflict(null);
+        return;
+      }
+      setSessionCenterConflict(null);
       setLoadingSeats(true);
       const findSeats = (payload: any): number | null => {
         const findInNode = (n: any): number | null => {
@@ -1023,10 +1031,25 @@ export default function BookingPage() {
         // getExamSessionById equivalent — primary source of truth for status + seats
         try {
           const r0: any = await api(`/exam-sessions/${encodeURIComponent(sessionId)}?locale=en`);
+          const node = r0?.exam_session || r0?.data?.exam_session || r0?.data || r0;
+          const detailCenterId = extractTestCenterId(node);
+          const expectedCenterId = String(selectedCenterId || "").trim();
+          const hasCenterConflict = Boolean(detailCenterId && expectedCenterId && detailCenterId !== expectedCenterId);
           if (active) {
-            const node = r0?.exam_session || r0?.data?.exam_session || r0?.data || r0;
-            setSessionDetail(node);
+            if (hasCenterConflict) {
+              setSessionDetail(null);
+              setLiveAvailableSeats(null);
+              setSessionCenterConflict({
+                expectedId: expectedCenterId,
+                actualId: detailCenterId,
+                actualName: getExplicitSessionCenterName(node) || getSessionCenterName(node) || `site ${detailCenterId}`,
+                sessionId: String(sessionId),
+              });
+            } else {
+              setSessionDetail(node);
+            }
           }
+          if (hasCenterConflict) return;
           seats = findSeats(r0);
         } catch {}
         if (seats == null) {
@@ -1056,7 +1079,7 @@ export default function BookingPage() {
       }
     })();
     return () => { active = false; };
-  }, [sessionId, selectedSession]);
+  }, [sessionId, selectedSession, selectedCenterId]);
 
   async function verifySelectedSessionCenter(selectedSessionPayloadId: string | number) {
     const detail: any = await api(`/exam-session/${encodeURIComponent(String(selectedSessionPayloadId))}?locale=en`);
@@ -1531,6 +1554,11 @@ export default function BookingPage() {
                   );
                 })}
               </select>
+              {sessionCenterConflict ? (
+                <small className="bk-error-text">
+                  Booking blocked: SVP returned {sessionCenterConflict.actualName} (site {sessionCenterConflict.actualId}) for this session, but the selected centre is site {sessionCenterConflict.expectedId}. Re-select a session; no other centre will be substituted.
+                </small>
+              ) : null}
             </div>
 
             <div className="bk-field">
@@ -1561,11 +1589,9 @@ export default function BookingPage() {
             <div className="bk-meta-row"><span>Available seats</span><strong>{loadingSeats ? "Loading…" : (liveAvailableSeats !== null ? liveAvailableSeats : (selectedSession ? (selectedSession.available_seats ?? selectedSession.seats_available ?? "-") : "-"))}</strong></div>
             <div className="bk-meta-row"><span>City</span><strong>{siteCity || selectedCity || "-"}</strong></div>
             <div className="bk-meta-row"><span>Site ID</span><strong>{siteId || "-"}</strong></div>
-            <div className="bk-meta-row"><span>Test centre ID</span><strong>{
-              extractTestCenterId(selectedSession) || extractTestCenterId(sessionDetail) || siteId || "-"
-            }</strong></div>
-            <div className="bk-meta-row"><span>Test centre</span><strong>{selectedSession ? getResolvedSessionCenterName(selectedSession) : (selectedCenterOption?.name || "-")}</strong></div>
-            <div className="bk-meta-row"><span>Session status</span><strong>{loadingSeats ? "Loading…" : (sessionDetail?.status || "-")}</strong></div>
+            <div className="bk-meta-row"><span>Selected centre ID</span><strong>{selectedCenterId || siteId || "-"}</strong></div>
+            <div className="bk-meta-row"><span>Selected centre</span><strong>{selectedCenterOption?.name || "-"}</strong></div>
+            <div className="bk-meta-row"><span>Session status</span><strong>{loadingSeats ? "Loading…" : (sessionCenterConflict ? "Blocked — centre mismatch" : (sessionDetail?.status || "-"))}</strong></div>
             <div className="bk-meta-row"><span>Hold ID</span><strong>{holdId || "-"}</strong></div>
             <div className="bk-meta-row"><span>Hold expires</span><strong>{holdExpiresAt || "-"}</strong></div>
             <div className="bk-meta-row"><span>Booking no.</span><strong className="bk-highlight">{reservationId || "-"}</strong></div>
@@ -1574,7 +1600,7 @@ export default function BookingPage() {
 
         {/* Actions */}
         <section className="bk-actions">
-          <button className="bk-btn bk-btn--ghost" type="button" onClick={createHold} disabled={creatingHold || !selectedCenterId || !sessionId}>
+          <button className="bk-btn bk-btn--ghost" type="button" onClick={createHold} disabled={creatingHold || !selectedCenterId || !sessionId || Boolean(sessionCenterConflict)}>
             {creatingHold ? "Creating hold…" : "Create hold"}
           </button>
           {paymentSession ? (
@@ -1583,11 +1609,11 @@ export default function BookingPage() {
             </button>
           ) : null}
           {isReschedule ? (
-            <button className="bk-btn bk-btn--primary" type="button" onClick={() => setShowRescheduleConfirm(true)} disabled={booking || !sessionId}>
+              <button className="bk-btn bk-btn--primary" type="button" onClick={() => setShowRescheduleConfirm(true)} disabled={booking || !sessionId || Boolean(sessionCenterConflict)}>
               {booking ? "Confirming…" : "Confirm reschedule →"}
             </button>
           ) : (
-            <button className="bk-btn bk-btn--primary" type="button" onClick={bookReservation} disabled={booking || !selectedCenterId || !sessionId || !holdId}>
+            <button className="bk-btn bk-btn--primary" type="button" onClick={bookReservation} disabled={booking || !selectedCenterId || !sessionId || !holdId || Boolean(sessionCenterConflict)}>
               {booking ? "Confirming…" : holdId ? "Confirm booking →" : "Create hold before booking"}
             </button>
           )}
