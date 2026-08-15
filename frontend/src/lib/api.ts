@@ -73,13 +73,19 @@ function getSession() {
 }
 
 function saveSession(data: { accessToken?: string; refreshToken?: string; sessionId?: string }) {
-  if (data.accessToken) localStorage.setItem("accessToken", data.accessToken);
+  if (data.accessToken) {
+    // Keep both historical storage keys synchronized. Some deployed proxy
+    // routes still read X-Access-Token while newer callers use Authorization.
+    localStorage.setItem("accessToken", data.accessToken);
+    localStorage.setItem("access_token", data.accessToken);
+  }
   if (data.refreshToken) localStorage.setItem("refreshToken", data.refreshToken);
   if (data.sessionId) localStorage.setItem("sessionId", data.sessionId);
 }
 
 function clearSession() {
   localStorage.removeItem("accessToken");
+  localStorage.removeItem("access_token");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("sessionId");
 }
@@ -158,16 +164,22 @@ async function callFunction<T = any>(
   let access = token || session.accessToken;
   const requestId = crypto.randomUUID();
 
-  const makeOpts = (accessToken: string | null): RequestInit => ({
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(localStorage.getItem("access_token") ? { "X-Access-Token": localStorage.getItem("access_token")! } : {}),
-      ...(method !== "GET" ? { "X-Request-Id": requestId } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const makeOpts = (accessToken: string | null): RequestInit => {
+    // Never pair a freshly refreshed Authorization token with a stale legacy
+    // token. The SVP proxy accepts both headers, and a mismatched legacy value
+    // can make centre-scoped session reads fail with HTTP 401.
+    const currentToken = accessToken || localStorage.getItem("access_token");
+    return {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+        ...(currentToken ? { "X-Access-Token": currentToken } : {}),
+        ...(method !== "GET" ? { "X-Request-Id": requestId } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    };
+  };
 
   const shouldRefresh = (status: number, payload: any) => {
     const message = String(payload?.message || payload?.error || "").toLowerCase();
@@ -188,7 +200,7 @@ async function callFunction<T = any>(
 
       if (refreshRes.res.ok && refreshRes.data?.accessToken) {
         access = refreshRes.data.accessToken;
-        localStorage.setItem("accessToken", access);
+        saveSession({ accessToken: access });
         ({ res, data } = await doFetch(`${BASE}${prefix}${path}`, makeOpts(access)));
       } else if (refreshRes.res.status === 401) {
         clearSession();
