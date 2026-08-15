@@ -101,6 +101,40 @@ export function getSessionSiteCity(item: any): string {
   );
 }
 
+export function getSessionPayloadId(value: string | number): number | string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && String(numeric) === raw) {
+    return numeric > 0 ? numeric : null;
+  }
+  return raw;
+}
+
+/**
+ * Build the new-booking body used by the official SVP confirm step.
+ *
+ * The encrypted exam_session_id is the authoritative center binding. The
+ * selected center and temporary hold remain client-side gates, but sending
+ * them as overrides lets stale center state redirect a booking within a city.
+ */
+export function buildExamReservationPayload(args: {
+  examSessionId: string | number | null;
+  occupationId: string | number;
+  methodology: string;
+  languageCode: string;
+}) {
+  return {
+    exam_session_id: args.examSessionId,
+    occupation_id: Number(args.occupationId),
+    methodology: args.methodology || "in_person",
+    language_code: args.languageCode,
+    site_id: null,
+    site_city: null,
+    hold_id: null,
+  };
+}
+
 export function getSessionCenterName(item: any): string {
   return String(
     getExplicitSessionCenterName(item) ||

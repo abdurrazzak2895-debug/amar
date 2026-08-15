@@ -9,6 +9,7 @@ import {
   pickArray, normalizeOccupation, normalizeDateValue,
   normalizeAvailableDateEntries, getSessionId, getSessionSiteId, getSessionSiteCity,
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey, getPrometricCodes, extractId,
+  getSessionPayloadId, buildExamReservationPayload,
   buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   formatDateLabel, detectBookingMode, resolveSessionCenter, SectionCenterRule,
 } from "@/lib/booking-utils";
@@ -178,16 +179,6 @@ export default function BookingPage() {
     return options.length ? options : [fallback, fallback + 1];
   }, [availableDates]);
   const bookingMode = useMemo(() => detectBookingMode(balanceInfo), [balanceInfo]);
-
-  function getSessionPayloadId(value: string): number | string | null {
-    const raw = String(value || "").trim();
-    if (!raw) return null;
-    const numeric = Number(raw);
-    if (Number.isFinite(numeric) && String(numeric) === raw) {
-      return numeric > 0 ? numeric : null;
-    }
-    return raw;
-  }
 
   function findUrlDeep(value: any, keys: string[]): string {
     if (!value || typeof value !== "object") return "";
@@ -1068,18 +1059,18 @@ export default function BookingPage() {
         setStatus(`Reservation rescheduled successfully: #${nextReservationId}`);
         if (nextReservationId) await openTicketPdf(String(nextReservationId), data);
       } else {
-        // Normal new booking. The selected center ID, city, opaque session token,
-        // and live hold are all sent together so one city with many centers cannot
-        // resolve to a different center during reservation creation.
+        // Normal new booking. The selected encrypted exam_session_id is the
+        // authoritative SVP center binding. The temporary hold is required by
+        // this page as a precondition, but the shared builder deliberately
+        // omits stale center/hold overrides from the SVP confirm request.
         const data: any = await api("/exam-reservations", {
           method: "POST", body: {
-            exam_session_id: String(selectedSessionPayloadId),
-            occupation_id: Number(selectedOccupationId),
-            methodology: methodology || "in_person",
-            language_code: effectiveLanguageCode,
-            site_id: String(selectedCenterId),
-            site_city: String(selectedCity),
-            hold_id: String(holdId),
+            ...buildExamReservationPayload({
+              examSessionId: String(selectedSessionPayloadId),
+              occupationId: selectedOccupationId,
+              methodology,
+              languageCode: effectiveLanguageCode,
+            }),
             country_id: 78,
             accept_declaration: true,
             info_confirmation: true,
