@@ -1060,6 +1060,20 @@ export default function BookingPage() {
     return () => { active = false; };
   }, [sessionId, selectedSession]);
 
+  async function verifySelectedSessionCenter(selectedSessionPayloadId: string | number) {
+    const detail: any = await api(`/exam-session/${encodeURIComponent(String(selectedSessionPayloadId))}?locale=en`);
+    const candidates = [detail, detail?.exam_session, detail?.data, detail?.data?.exam_session];
+    const detailCenterId = candidates
+      .map((candidate) => getSessionSiteId(candidate))
+      .find((value) => value != null && String(value).trim() !== "");
+    if (!detailCenterId || String(detailCenterId) !== String(selectedCenterId)) {
+      throw new Error(
+        `SVP session centre mismatch: selected site ${selectedCenterId}, session belongs to site ${detailCenterId || "unknown"}`
+      );
+    }
+    return detail;
+  }
+
   async function createHold() {
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     // Only hold the SELECTED session, not every session in the city.
@@ -1073,6 +1087,7 @@ export default function BookingPage() {
     }
     setCreatingHold(true); setError(""); setStatus("");
     try {
+      await verifySelectedSessionCenter(selectedSessionId);
       const data: any = await api("/temporary-seats", {
         method: "POST",
         body: {
@@ -1101,8 +1116,8 @@ export default function BookingPage() {
     const selectedSessionPayloadId = getSessionPayloadId(getSessionId(selectedSession) || sessionId);
     if (selectedSessionPayloadId === null) { setError("No valid exam session selected"); return; }
     const selectedSessionIdForApi = String(selectedSessionPayloadId);
-    try { await api(`/exam-session/${encodeURIComponent(selectedSessionIdForApi)}?locale=en`); }
-    catch (err: any) { setError(err?.message || "Selected exam session is no longer available"); return; }
+    try { await verifySelectedSessionCenter(selectedSessionIdForApi); }
+    catch (err: any) { setError(err?.message || "Selected exam session is not bound to the selected test centre"); return; }
     const sessionCodes = getPrometricCodes(selectedSession);
     const effectiveLanguageCode = languageCode || selectedOccupation?.languageCodes?.[0]?.code || sessionCodes?.[0]?.code || sessionCodes?.[0]?.language_code || "";
     if (!effectiveLanguageCode) { setError("language_code is required. Select a language before booking."); return; }
