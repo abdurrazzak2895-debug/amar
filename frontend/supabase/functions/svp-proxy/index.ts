@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verify } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 import { canFinalizeWalletDebit, getReservationBillingOperation } from "./billing-utils.ts";
+import { filterLiveSessionsForCenter, getSessionCenterId } from "./session-center-utils.ts";
 import {
   buildReservationCollectionQuery,
   filterReservationRows,
@@ -614,9 +615,8 @@ function enrichSessionsForCenter(sessions: any[], center: any, testCenterId: str
 }
 
 function rawSessionMatchesCenter(session: any, testCenterId: string): boolean {
-  const sessionCenterId = session?.test_center_id ?? session?.test_center?.test_center_id ??
-    session?.test_center?.id ?? session?.site_id ?? session?.site?.id;
-  return sessionCenterId == null || String(sessionCenterId) === String(testCenterId);
+  return Boolean(getSessionCenterId(session)) &&
+    String(getSessionCenterId(session)) === String(testCenterId);
 }
 
 async function fetchOfficialCenterSessions(
@@ -921,9 +921,19 @@ Deno.serve(async (req) => {
           const centerByName = new Map(
             centers.map((center: any) => [String(center?.name || "").trim().toLowerCase(), center])
           );
-          const sessions = (Array.isArray(sessionsData?.sessions) ? sessionsData.sessions : [])
+          const requestedCenterId = String(sessionParams.get("test_center_id") || "").trim();
+          const normalizedSessions = (Array.isArray(sessionsData?.sessions) ? sessionsData.sessions : [])
             .map((item: any) => normalizeT2HubSession(item, centerByName));
-          return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
+          const sessions = requestedCenterId
+            ? filterLiveSessionsForCenter(normalizedSessions, requestedCenterId)
+            : normalizedSessions.filter((session: any) => Boolean(getSessionCenterId(session)));
+          return json({
+            ...sessionsData,
+            sessions,
+            exam_sessions: sessions,
+            sites: centers,
+            ...(requestedCenterId ? { test_center_id: requestedCenterId } : {}),
+          });
         } catch {
           // Fall back to the official SVP endpoint below if t2hub is unavailable.
         }
