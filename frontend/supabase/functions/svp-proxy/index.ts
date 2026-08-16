@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verify } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
-import { getReservationBillingOperation } from "./billing-utils.ts";
+import { canFinalizeWalletDebit, getReservationBillingOperation } from "./billing-utils.ts";
 import {
   buildReservationCollectionQuery,
   filterReservationRows,
@@ -1074,7 +1074,15 @@ Deno.serve(async (req) => {
         }
         if (isChargeableBooking && accessContext?.account.permission_mode === "MANAGED") {
           const reservationId = findReservationId(data) ||
-            (isBookingReschedule ? String(match[1]) : `svp-success:${req.headers.get("x-request-id") || walletHoldId}`);
+            (isBookingReschedule ? String(match[1]) : "");
+          if (!canFinalizeWalletDebit(billingOperation, reservationId)) {
+            throw {
+              statusCode: 502,
+              code: "WALLET_DEBIT_BLOCKED_NO_RESERVATION_ID",
+              message: "Reservation completed without a reservation ID; wallet debit was not finalized",
+              details: { operation: billingOperation, wallet_hold_id: walletHoldId },
+            };
+          }
           let walletTransaction: any = null;
           if (walletHoldId) {
             const { data: completedTransaction, error: completeError } = await accessContext.supabase.rpc("wallet_complete_booking_hold", {
