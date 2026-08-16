@@ -18,10 +18,12 @@ import {
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
   const { hasPermission } = useAccessAuth();
+  const { isAuthenticated: isCandidateAuthenticated } = useAuth();
   const [occupations, setOccupations] = useState<any[]>([]);
   const [availableDateEntries, setAvailableDateEntries] = useState<{ city: string; date: string }[]>([]);
   const [liveCityOptions, setLiveCityOptions] = useState<string[]>([]);
@@ -1190,6 +1192,10 @@ export default function BookingPage() {
 
   async function bookReservation() {
     const isRescheduleRequest = searchParams.get("reschedule") === "1" && searchParams.get("reservationId");
+    if (!isCandidateAuthenticated) {
+      setError("Active candidate account is required. Sign in through the candidate SVP login before confirming this booking.");
+      return;
+    }
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     if (!isRescheduleRequest && !holdId) { setError("Create a live temporary seat hold before confirming the booking"); return; }
     const selectedSessionPayloadId = getSessionPayloadId(getSessionId(selectedSession) || sessionId);
@@ -1291,7 +1297,22 @@ export default function BookingPage() {
         }
       }
     } catch (err: any) {
-      if (!recoverFromNoExamSession422(err)) setError(err?.message || "Failed to book reservation");
+      const detail = err?.data?.details || err?.details;
+      const upstreamText = [
+        err?.message,
+        detail?.message,
+        detail?.error,
+        detail?.errors?.temporaryseat?.labor_id?.[0],
+      ].filter(Boolean).join(" ");
+      if (!recoverFromNoExamSession422(err)) {
+        if (/active candidate account is required/i.test(upstreamText)) {
+          setError("Active candidate account is required. Sign in through the candidate SVP login, then recreate the hold and confirm again.");
+        } else if (/labor_id.*already been taken/i.test(upstreamText)) {
+          setError("This candidate labor ID is already registered in SVP. Use the existing candidate account instead of creating a duplicate.");
+        } else {
+          setError(err?.message || "Failed to book reservation");
+        }
+      }
     }
     finally { setBooking(false); }
   }

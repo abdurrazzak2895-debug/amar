@@ -1,3 +1,14 @@
+function getUpstreamMessage(data) {
+  const direct = data?.message || data?.error;
+  if (direct) return String(direct);
+  const nested = data?.errors?.temporaryseat?.labor_id;
+  if (Array.isArray(nested) && nested[0]) return String(nested[0]);
+  const firstError = Object.values(data?.errors || {}).flatMap((value) =>
+    Array.isArray(value) ? value : Object.values(value || {}).flatMap((item) => Array.isArray(item) ? item : [])
+  )[0];
+  return firstError ? String(firstError) : '';
+}
+
 export async function svpRequest(path, { method='GET', token, body } = {}) {
   const base = process.env.SVP_BASE_URL;
   const locale = process.env.SVP_LOCALE || 'en';
@@ -36,9 +47,13 @@ export async function svpRequest(path, { method='GET', token, body } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
 
   if (!res.ok) {
-    const err = new Error(`SVP request failed: ${res.status}`);
+    const upstreamMessage = getUpstreamMessage(data);
+    const err = new Error(
+      upstreamMessage ? `SVP request failed: ${res.status}: ${upstreamMessage}` : `SVP request failed: ${res.status}`
+    );
     err.statusCode = res.status;
     err.details = data;
+    err.upstreamMessage = upstreamMessage || undefined;
     throw err;
   }
   return data;
@@ -82,9 +97,13 @@ export async function svpMultipartRequest(path, { contentType, body } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
 
   if (!res.ok) {
-    const err = new Error(`SVP request failed: ${res.status}`);
+    const upstreamMessage = getUpstreamMessage(data);
+    const err = new Error(
+      upstreamMessage ? `SVP request failed: ${res.status}: ${upstreamMessage}` : `SVP request failed: ${res.status}`
+    );
     err.statusCode = res.status;
     err.details = data;
+    err.upstreamMessage = upstreamMessage || undefined;
     throw err;
   }
   return data;
