@@ -47,6 +47,34 @@ async function getAccessJwtKey() {
   );
 }
 
+type SvpErrorCode = "CANDIDATE_ACCOUNT_REQUIRED" | "CANDIDATE_LABOR_ID_EXISTS" | "SVP_VALIDATION_ERROR" | "SVP_UPSTREAM_ERROR";
+
+function firstNestedError(data: any): string {
+  const laborId = data?.errors?.temporaryseat?.labor_id;
+  if (Array.isArray(laborId) && laborId[0]) return String(laborId[0]);
+  for (const value of Object.values(data?.errors || {})) {
+    if (Array.isArray(value) && value[0]) return String(value[0]);
+    if (value && typeof value === "object") {
+      for (const item of Object.values(value as Record<string, unknown>)) {
+        if (Array.isArray(item) && item[0]) return String(item[0]);
+      }
+    }
+  }
+  return "";
+}
+
+function normalizeSvpError(statusCode: number, data: any) {
+  const rawMessage = String(data?.message || data?.error || firstNestedError(data) || "");
+  const normalized = rawMessage.toLowerCase();
+  if (normalized.includes("active candidate account is required") || (normalized.includes("candidate account") && normalized.includes("required"))) {
+    return { statusCode, code: "CANDIDATE_ACCOUNT_REQUIRED" as SvpErrorCode, message: "Active candidate account is required", details: { upstreamStatus: statusCode } };
+  }
+  if (normalized.includes("labor_id") && normalized.includes("already been taken")) {
+    return { statusCode: 409, code: "CANDIDATE_LABOR_ID_EXISTS" as SvpErrorCode, message: "This candidate labor ID is already registered. Use the existing candidate account.", details: { upstreamStatus: statusCode } };
+  }
+  return { statusCode, code: (statusCode === 422 ? "SVP_VALIDATION_ERROR" : "SVP_UPSTREAM_ERROR") as SvpErrorCode, message: rawMessage || `SVP request failed: ${statusCode}`, details: { upstreamStatus: statusCode } };
+}
+
 async function requireAccessPermission(req: Request, permissionKey: string) {
   const token = req.headers.get("x-access-token")?.trim();
   if (!token) throw { statusCode: 401, message: "Access Portal login is required" };
@@ -63,7 +91,7 @@ async function requireAccessPermission(req: Request, permissionKey: string) {
     .eq("id", payload.sub || "")
     .single();
   if (!account || account.status !== "ACTIVE" || account.role !== "USER") {
-    throw { statusCode: 403, message: "Active candidate account is required" };
+    throw { statusCode: 403, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Active candidate account is required" };
   }
   if (account.permission_mode === "MANAGED") {
     const { data: permission } = await supabase.from("account_permissions")
@@ -155,7 +183,7 @@ async function svpFetch(
   }
 
   if (!res.ok) {
-    throw { statusCode: res.status, message: `SVP request failed: ${res.status}`, details: data };
+    throw normalizeSvpError(res.status, data);
   }
   return data;
 }
@@ -1072,7 +1100,7 @@ Deno.serve(async (req) => {
 
     return json({ error: "Not found" }, 404);
   } catch (err: any) {
-    const status = err?.statusCode || 500;
-    return json({ message: err?.message || "Server error", details: err?.details }, status);
+    const status = Number(err?.statusCode || 500);
+    return json({ error: { code: err?.code || (status === 401 ? "AUTH_REQUIRED" : "SVP_PROXY_ERROR"), message: err?.message || "Server error", request_id: req.headers.get("x-request-id") || null } }, status);
   }
 });

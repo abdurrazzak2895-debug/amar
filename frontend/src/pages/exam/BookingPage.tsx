@@ -1298,19 +1298,21 @@ export default function BookingPage() {
       }
     } catch (err: any) {
       const detail = err?.data?.details || err?.details;
+      const errorCode = err?.data?.error?.code || err?.data?.code || err?.code;
       const upstreamText = [
         err?.message,
+        err?.data?.error?.message,
         detail?.message,
         detail?.error,
         detail?.errors?.temporaryseat?.labor_id?.[0],
       ].filter(Boolean).join(" ");
       if (!recoverFromNoExamSession422(err)) {
-        if (/active candidate account is required/i.test(upstreamText)) {
+        if (errorCode === "CANDIDATE_ACCOUNT_REQUIRED" || /active candidate account is required/i.test(upstreamText)) {
           setError("Active candidate account is required. Sign in through the candidate SVP login, then recreate the hold and confirm again.");
-        } else if (/labor_id.*already been taken/i.test(upstreamText)) {
+        } else if (errorCode === "CANDIDATE_LABOR_ID_EXISTS" || /labor_id.*already been taken/i.test(upstreamText)) {
           setError("This candidate labor ID is already registered in SVP. Use the existing candidate account instead of creating a duplicate.");
         } else {
-          setError(err?.message || "Failed to book reservation");
+          setError(err?.data?.error?.message || err?.message || "Failed to book reservation");
         }
       }
     }
