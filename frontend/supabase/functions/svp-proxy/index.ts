@@ -529,6 +529,35 @@ function normalizeCityName(value: unknown): string {
   return String(value || "").trim();
 }
 
+function extractSessionCenterIds(value: any): string[] {
+  const candidates = [value, value?.exam_session, value?.data, value?.data?.exam_session].filter(Boolean);
+  return Array.from(new Set(candidates.map((session: any) => String(
+    session?.test_center_id ?? session?.test_center?.test_center_id ?? session?.test_center?.id ??
+    session?.site_id ?? session?.site?.id ?? ""
+  ).trim()).filter(Boolean)));
+}
+
+async function assertSvpSessionMatchesCenter(token: string, sessionId: string | number, expectedCenterId: string | number) {
+  const expected = String(expectedCenterId || "").trim();
+  if (!expected) throw { statusCode: 400, code: "CENTER_BINDING_REQUIRED", message: "Selected test centre is required" };
+  const detail = await svpFetch(
+    `/api/v1/individual_labor_space/exam_sessions/${encodeURIComponent(String(sessionId))}`,
+    { method: "GET", token },
+  );
+  const actualIds = extractSessionCenterIds(detail);
+  if (!actualIds.length) {
+    throw { statusCode: 502, code: "CENTER_BINDING_UNVERIFIED", message: "SVP did not return a centre for the selected session" };
+  }
+  if (actualIds.some((id) => id !== expected)) {
+    throw {
+      statusCode: 409,
+      code: "CENTER_MISMATCH",
+      message: `Selected session belongs to site ${actualIds[0]}, not selected site ${expected}`,
+      details: { expected_center_id: expected, actual_center_ids: actualIds },
+    };
+  }
+}
+
 function normalizeTestCenter(center: any) {
   const id = center?.test_center_id ?? center?.id ?? center?.site_id ?? center?.site?.id ?? "";
   const name = center?.test_center_name || center?.name || center?.site?.name || "";
@@ -1009,6 +1038,16 @@ Deno.serve(async (req) => {
 
       const svpPath = typeof route.svpPath === "function" ? route.svpPath(match, query) : route.svpPath;
       const body = route.bodyForward ? await req.json().catch(() => ({})) : undefined;
+      const isReservationWrite = req.method === "POST" &&
+        (path === "/exam-reservations" || /^\/exam-reservations\/[^/]+\/reschedule$/.test(path));
+      if (isReservationWrite) {
+        const requestedSessionId = body?.exam_session_id;
+        const requestedCenterId = body?.test_center_id;
+        if (requestedSessionId === undefined || requestedSessionId === null || requestedSessionId === "") {
+          throw { statusCode: 400, code: "SESSION_BINDING_REQUIRED", message: "Selected exam session is required" };
+        }
+        await assertSvpSessionMatchesCenter(svpToken, requestedSessionId, requestedCenterId);
+      }
 
       const billingOperation = getReservationBillingOperation(req.method, path);
       const isBookingCreate = billingOperation === "booking";

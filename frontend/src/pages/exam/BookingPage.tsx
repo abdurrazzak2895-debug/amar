@@ -1274,6 +1274,7 @@ export default function BookingPage() {
           body: {
             id: Number(oldReservationId),
             exam_session_id: selectedSessionPayloadId,
+            test_center_id: String(selectedCenterId),
             language_code: rescheduleLanguageCode,
           },
         });
@@ -1296,6 +1297,7 @@ export default function BookingPage() {
               languageCode: effectiveLanguageCode,
             }),
             country_id: 78,
+            test_center_id: String(selectedCenterId),
             accept_declaration: true,
             info_confirmation: true,
             practical_confirmation: true,
