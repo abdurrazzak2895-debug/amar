@@ -74,10 +74,9 @@ function getSession() {
 
 function saveSession(data: { accessToken?: string; refreshToken?: string; sessionId?: string }) {
   if (data.accessToken) {
-    // Keep both historical storage keys synchronized. Some deployed proxy
-    // routes still read X-Access-Token while newer callers use Authorization.
+    // accessToken is the candidate SVP session. The access-portal token is
+    // owned by access-api.ts and remains in the separate access_token key.
     localStorage.setItem("accessToken", data.accessToken);
-    localStorage.setItem("access_token", data.accessToken);
   }
   if (data.refreshToken) localStorage.setItem("refreshToken", data.refreshToken);
   if (data.sessionId) localStorage.setItem("sessionId", data.sessionId);
@@ -85,7 +84,6 @@ function saveSession(data: { accessToken?: string; refreshToken?: string; sessio
 
 function clearSession() {
   localStorage.removeItem("accessToken");
-  localStorage.removeItem("access_token");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("sessionId");
 }
@@ -164,17 +162,14 @@ async function callFunction<T = any>(
   let access = token || session.accessToken;
   const requestId = crypto.randomUUID();
 
-  const makeOpts = (accessToken: string | null): RequestInit => {
-    // Never pair a freshly refreshed Authorization token with a stale legacy
-    // token. The SVP proxy accepts both headers, and a mismatched legacy value
-    // can make centre-scoped session reads fail with HTTP 401.
-    const currentToken = accessToken || localStorage.getItem("access_token");
+  const makeOpts = (candidateToken: string | null): RequestInit => {
+    const accessPortalToken = localStorage.getItem("access_token");
     return {
       method,
       headers: {
         "Content-Type": "application/json",
-        ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
-        ...(currentToken ? { "X-Access-Token": currentToken } : {}),
+        ...(candidateToken ? { Authorization: `Bearer ${candidateToken}` } : {}),
+        ...(accessPortalToken ? { "X-Access-Token": accessPortalToken } : {}),
         ...(method !== "GET" ? { "X-Request-Id": requestId } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,

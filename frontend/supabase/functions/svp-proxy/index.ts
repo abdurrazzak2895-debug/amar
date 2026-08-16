@@ -82,7 +82,7 @@ async function requireAccessPermission(req: Request, permissionKey: string) {
   try {
     payload = await verify(token, await getAccessJwtKey()) as { sub?: string };
   } catch {
-    throw { statusCode: 401, message: "Access Portal session expired" };
+    throw { statusCode: 401, code: "ACCESS_ACCOUNT_REQUIRED", message: "Access Portal session expired" };
   }
   const supabase = getSupabase();
   const { data: account } = await supabase
@@ -91,7 +91,7 @@ async function requireAccessPermission(req: Request, permissionKey: string) {
     .eq("id", payload.sub || "")
     .single();
   if (!account || account.status !== "ACTIVE" || account.role !== "USER") {
-    throw { statusCode: 403, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Active candidate account is required" };
+    throw { statusCode: 403, code: "ACCESS_ACCOUNT_REQUIRED", message: "An active access-portal account with booking permission is required" };
   }
   if (account.permission_mode === "MANAGED") {
     const { data: permission } = await supabase.from("account_permissions")
@@ -449,16 +449,23 @@ async function verifyJwt(token: string): Promise<Record<string, unknown>> {
 async function requireAuth(req: Request): Promise<{ user: Record<string, unknown>; svpToken: string }> {
   const hdr = req.headers.get("authorization") || "";
   const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : null;
-  if (!token) throw { statusCode: 401, message: "Missing access token" };
+  if (!token) throw { statusCode: 401, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "An active candidate SVP session is required" };
 
-  const user = await verifyJwt(token);
+  let user: Record<string, unknown>;
+  try {
+    user = await verifyJwt(token);
+  } catch {
+    throw { statusCode: 401, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Candidate SVP session expired" };
+  }
   const sessionId = user.sid as string;
-  if (!sessionId) throw { statusCode: 401, message: "Missing session" };
+  if (!sessionId) throw { statusCode: 401, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Candidate SVP session is invalid" };
 
   const supabase = getSupabase();
   const { data: session } = await supabase.from("svp_sessions").select("*").eq("id", sessionId).single();
-  if (!session || session.revoked_at) throw { statusCode: 401, message: "Session revoked" };
-  if (!session.svp_access_enc) throw { statusCode: 401, message: "Missing SVP token" };
+  if (!session || session.revoked_at || (session.refresh_expires_at && new Date(session.refresh_expires_at).getTime() <= Date.now())) {
+    throw { statusCode: 401, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Candidate SVP session is inactive or expired" };
+  }
+  if (!session.svp_access_enc) throw { statusCode: 401, code: "CANDIDATE_ACCOUNT_REQUIRED", message: "Candidate SVP token is unavailable" };
 
   const svpToken = await decryptString(session.svp_access_enc);
   return { user, svpToken };
