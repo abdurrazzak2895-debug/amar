@@ -24,15 +24,23 @@ export function pickArray(payload: any): any[] {
 }
 
 /** True when SVP rejected a 422 because the selected session is no longer usable. */
-export function isNoExamSession422(error: any): boolean {
+function getErrorFragments(error: any): string {
   const details = error?.data?.details;
-  const fragments = [
+  return [
     error?.message,
     error?.data?.message,
     error?.data?.error,
     typeof details === "string" ? details : JSON.stringify(details || ""),
   ].filter(Boolean).join(" ");
-  return Number(error?.status) === 422 && /no\s+exam\s+session|test\s+center.*no.*session|exam\s+session.*(?:not|unavailable|found)/i.test(fragments);
+}
+
+export function isNoExamSession422(error: any): boolean {
+  return Number(error?.status) === 422 && /no\s+exam\s+session|test\s+center.*no.*session|exam\s+session.*(?:not|unavailable|found)/i.test(getErrorFragments(error));
+}
+
+/** True when SVP says this labor already owns a temporary seat. */
+export function isLaborIdAlreadyTaken422(error: any): boolean {
+  return Number(error?.status) === 422 && /labor[_\s-]?id[\s\S]{0,120}already\s+been\s+taken|already\s+been\s+taken[\s\S]{0,120}labor[_\s-]?id/i.test(getErrorFragments(error));
 }
 
 export const VERIFIED_DHAKA_CENTER_ROSTER = [
@@ -134,9 +142,21 @@ export function getSessionId(item: any): string {
   );
 }
 
+/**
+ * Centre binding written by the strict `/exam-sessions` proxy route. The SVP
+ * session ID is opaque; this object is the durable association used by the UI
+ * before detail, hold, and reservation calls.
+ */
+export function getSessionBinding(item: any): any {
+  const nested = item?.exam_session || item?.data?.exam_session || {};
+  return item?.session_binding || item?.center_binding || item?.booking_binding ||
+    nested?.session_binding || nested?.center_binding || nested?.booking_binding || {};
+}
+
 export function getSessionSiteId(item: any): string {
   const nested = item?.exam_session || item?.data?.exam_session || {};
   const center = item?.test_center || nested?.test_center || {};
+  const binding = getSessionBinding(item);
   return String(
     item?.site_id ||
     nested?.site_id ||
@@ -147,6 +167,10 @@ export function getSessionSiteId(item: any): string {
     nested?.test_center_id ||
     item?.site?.id ||
     nested?.site?.id ||
+    binding?.test_center_id ||
+    binding?.site_id ||
+    binding?.test_center?.test_center_id ||
+    binding?.test_center?.id ||
     ""
   );
 }
@@ -299,7 +323,40 @@ export function getSessionCenterName(item: any): string {
 }
 
 export function getExplicitSessionCenterName(item: any): string {
-  return String(item?.test_center_name || item?.test_center?.name || item?.test_center?.test_center_name || "").trim();
+  const binding = getSessionBinding(item);
+  return String(
+    item?.test_center_name ||
+    item?.test_center?.name ||
+    item?.test_center?.test_center_name ||
+    binding?.test_center_name ||
+    binding?.name ||
+    binding?.test_center?.name ||
+    binding?.test_center?.test_center_name ||
+    ""
+  ).trim();
+}
+
+/**
+ * Return a human-readable ordinal shift without replacing the opaque SVP ID.
+ * Explicit SVP section/shift data wins; otherwise the centre-scoped list order
+ * supplies a deterministic label for the same date.
+ */
+export function getSessionShiftLabel(item: any, index = 0): string {
+  const binding = getSessionBinding(item);
+  const raw = String(
+    binding?.shift_label || binding?.shift || item?.shift_label || item?.shift ||
+    item?.section_name || item?.section_code || item?.section || item?.exam_section || ""
+  ).trim();
+  const ordinal = (value: string): string => {
+    const lower = value.toLowerCase();
+    if (/^(1|1st|first)\b/.test(lower)) return "First shift";
+    if (/^(2|2nd|second)\b/.test(lower)) return "Second shift";
+    if (/^(3|3rd|third)\b/.test(lower)) return "Third shift";
+    if (/^(4|4th|fourth)\b/.test(lower)) return "Fourth shift";
+    return "";
+  };
+  if (raw) return ordinal(raw) || (/shift/i.test(raw) ? raw : `Session ${raw}`);
+  return ["First shift", "Second shift", "Third shift", "Fourth shift"][index] || `Session ${index + 1}`;
 }
 
 export function getSessionSection(item: any): string {

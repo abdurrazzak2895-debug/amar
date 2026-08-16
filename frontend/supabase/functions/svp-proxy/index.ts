@@ -596,20 +596,33 @@ function extractSessions(payload: any): any[] {
 
 function enrichSessionsForCenter(sessions: any[], center: any, testCenterId: string, city: string) {
   const normalizedCenter = normalizeTestCenter(center || { id: testCenterId, city });
+  const boundCenterId = normalizedCenter.test_center_id || testCenterId;
+  const boundCenterName = normalizedCenter.test_center_name || "";
+  const boundCity = normalizedCenter.city || city;
   return sessions.map((session: any) => ({
     ...session,
-    site_id: normalizedCenter.test_center_id || testCenterId,
-    test_center_id: normalizedCenter.test_center_id || testCenterId,
-    test_center_name: normalizedCenter.test_center_name || session?.test_center_name || "",
-    site_city: normalizedCenter.city || session?.site_city || city,
+    // The encrypted/opaque SVP session ID is never decoded or replaced. This
+    // binding records the exact centre query that produced the row and is the
+    // only safe fallback when the later detail endpoint returns city-only data.
+    session_binding: {
+      source: "svp-center-scoped-exam-sessions",
+      test_center_id: boundCenterId,
+      test_center_name: boundCenterName,
+      city: boundCity,
+      exam_session_id: String(session?.encrypted_session_id ?? session?.id ?? session?.session_id ?? session?.exam_session_id ?? ""),
+    },
+    site_id: boundCenterId,
+    test_center_id: boundCenterId,
+    test_center_name: boundCenterName || session?.test_center_name || "",
+    site_city: boundCity || session?.site_city || city,
     test_center: {
       ...(session?.test_center || {}),
       id: normalizedCenter.id || session?.test_center?.id || testCenterId,
-      test_center_id: normalizedCenter.test_center_id || session?.test_center?.test_center_id || testCenterId,
+      test_center_id: boundCenterId,
       name: normalizedCenter.name || session?.test_center?.name || session?.test_center?.test_center_name || "",
-      test_center_name: normalizedCenter.test_center_name || session?.test_center?.test_center_name || session?.test_center?.name || "",
-      city: normalizedCenter.city || session?.test_center?.city || session?.test_center?.test_center_city || city,
-      test_center_city: normalizedCenter.city || session?.test_center?.test_center_city || session?.test_center?.city || city,
+      test_center_name: boundCenterName || session?.test_center?.test_center_name || session?.test_center?.name || "",
+      city: boundCity || session?.test_center?.city || session?.test_center?.test_center_city || city,
+      test_center_city: boundCity || session?.test_center?.test_center_city || session?.test_center?.city || city,
     },
   }));
 }
@@ -1016,6 +1029,19 @@ Deno.serve(async (req) => {
       const headers: Record<string, string> = { ...corsHeaders, "Content-Type": contentType };
       if (disposition) headers["Content-Disposition"] = disposition;
       return new Response(await upstream.arrayBuffer(), { status: 200, headers });
+    }
+
+    // ── Read-only active temporary-seat lookup ────────────────
+    // Used only to reuse the current labor's own hold after SVP returns
+    // `labor_id has already been taken`; it never creates or deletes a hold.
+    if (req.method === "GET" && path === "/temporary-seats") {
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      const data = await svpFetch(
+        buildPath("/api/v1/individual_labor_space/temporary_seats", params.toString()),
+        { method: "GET", token: svpToken },
+      );
+      return json(data);
     }
 
     // ── Center-bound temporary seat hold ─────────────────────

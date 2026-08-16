@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildCenterOptions,
   filterCentersWithAvailableSessions,
+  filterSessionsForCenter,
   getSessionCenterName,
   getSessionSiteId,
   getCenterKey,
@@ -10,7 +11,10 @@ import {
   getResponseCenterIds,
   getResponseCenterName,
   resolveVerifiedResponseCenterId,
+  getSessionBinding,
+  getSessionShiftLabel,
   isNoExamSession422,
+  isLaborIdAlreadyTaken422,
 } from "./booking-utils";
 
 describe("booking-utils center name resolution", () => {
@@ -172,6 +176,44 @@ describe("booking-utils center name resolution", () => {
       { siteId: "180", sessionCount: 0 },
       { siteId: "240", sessionCount: 0 },
     ])).toEqual([]);
+  });
+
+  it("keeps an opaque session bound to the centre-scoped query", () => {
+    const session = {
+      encrypted_session_id: "opaque-session-1",
+      session_binding: {
+        source: "svp-center-scoped-exam-sessions",
+        exam_session_id: "opaque-session-1",
+        test_center_id: "220",
+        test_center_name: "Kishoreganj Technical Training Centre",
+        city: "Dhaka",
+      },
+    };
+
+    expect(getSessionBinding(session).test_center_id).toBe("220");
+    expect(getSessionSiteId(session)).toBe("220");
+    expect(getSessionCenterName(session)).toBe("Kishoreganj Technical Training Centre");
+    expect(filterSessionsForCenter([session], "220")).toEqual([session]);
+    expect(filterSessionsForCenter([session], "45")).toEqual([]);
+  });
+
+  it("labels every same-date session as a distinct shift without changing its opaque ID", () => {
+    expect(getSessionShiftLabel({}, 0)).toBe("First shift");
+    expect(getSessionShiftLabel({}, 1)).toBe("Second shift");
+    expect(getSessionShiftLabel({ section: "3rd" }, 0)).toBe("Third shift");
+    expect(getSessionShiftLabel({ session_binding: { shift_label: "4th shift" } }, 0)).toBe("Fourth shift");
+  });
+
+  it("classifies duplicate labor temporary-seat 422 details", () => {
+    expect(isLaborIdAlreadyTaken422({
+      status: 422,
+      message: "SVP request failed: 422",
+      data: { details: { errors: { temporaryseat: { labor_id: ["has already been taken"] } } } },
+    })).toBe(true);
+    expect(isLaborIdAlreadyTaken422({
+      status: 422,
+      data: { details: { message: "test center selected no exam session" } },
+    })).toBe(false);
   });
 
   it("classifies SVP no-exam-session 422 details as stale-session errors", () => {

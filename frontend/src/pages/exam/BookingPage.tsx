@@ -9,8 +9,10 @@ import {
   pickArray, normalizeOccupation, normalizeDateValue,
   normalizeAvailableDateEntries, getSessionId, getSessionSiteId, getSessionSiteCity,
   getSessionCenterName, getExplicitSessionCenterName, getCenterKey,   getPrometricCodes, extractId,
-  getSessionPayloadId, buildExamReservationPayload, filterSessionsForCenter,
+    getSessionPayloadId, getSessionShiftLabel, buildExamReservationPayload, filterSessionsForCenter,
   getResponseCenterIds, getResponseCenterName, resolveVerifiedResponseCenterId,
+  isLaborIdAlreadyTaken422,
+
   filterCentersWithAvailableSessions, buildCenterOptions, buildCityOptions, buildDateOptions, buildCalendarDays,
   mergeVerifiedCityCenterRoster,
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
@@ -156,23 +158,14 @@ export default function BookingPage() {
   const filteredSessions = useMemo(
     () => {
       if (!selectedCenterId) return [];
-      const byId = sessionsWithResolvedCenters.filter(
+      // A centre-scoped proxy response must carry an explicit binding. Do not
+      // infer a centre from a name or city: an opaque SVP session ID is safe
+      // only when its site/test_center ID is present and equals the selection.
+      return sessionsWithResolvedCenters.filter(
         (item) => String(getSessionSiteId(item)) === String(selectedCenterId)
       );
-      if (byId.length) return byId;
-
-      // Legacy live responses may carry the full center name but omit its ID.
-      // A name fallback is allowed only when the selected live center has a
-      // unique matching name; it never falls back to the whole city.
-      const selectedCenter = centerOptions.find((item) => String(item.siteId) === String(selectedCenterId));
-      const selectedName = String(selectedCenter?.name || "").trim().toLowerCase();
-      return selectedName
-        ? sessionsWithResolvedCenters.filter(
-            (item) => !getSessionSiteId(item) && getResolvedSessionCenterName(item).trim().toLowerCase() === selectedName
-          )
-        : [];
     },
-    [sessionsWithResolvedCenters, selectedCenterId, centerOptions]
+    [sessionsWithResolvedCenters, selectedCenterId]
   );
   const selectedSession = useMemo(
     () => filteredSessions.find((item) => String(getSessionId(item)) === String(sessionId)) || null,
@@ -1161,6 +1154,39 @@ export default function BookingPage() {
     return true;
   }
 
+  async function recoverFromLaborIdAlreadyTaken422(error: any, selectedSessionPayloadId: string | number): Promise<boolean> {
+    if (!isLaborIdAlreadyTaken422(error)) return false;
+    const centerName = selectedCenterOption?.name || `site ${selectedCenterId}`;
+    try {
+      // SVP may already own a live temporary seat for this labor. Reuse it only
+      // if the read-back response is centre-compatible; never create a new hold
+      // at another centre and never guess an ID from an unrelated response.
+      const params = new URLSearchParams({
+        exam_session_id: String(selectedSessionPayloadId),
+        test_center_id: String(selectedCenterId),
+      });
+      const existing: any = await api(`/temporary-seats?${params.toString()}`);
+      assertResponseMatchesSelectedCenter(existing, "existing temporary hold response");
+      const existingHoldId = extractId(existing, ["id", "hold_id", "temporary_seat_id"]);
+      if (!existingHoldId) throw new Error("SVP reported an existing temporary seat but returned no hold ID");
+      setHoldId(existingHoldId);
+      setHoldExpiresAt(String(existing?.expired_at || existing?.expires_at || existing?.temporary_seat?.expired_at || ""));
+      setSiteId(String(selectedCenterId));
+      setSiteCity(String(selectedCity));
+      setError("");
+      setStatus(`Existing temporary hold reused for ${centerName}: #${existingHoldId}`);
+      return true;
+    } catch {
+      setHoldId("");
+      setHoldExpiresAt("");
+      setError(
+        `SVP already has an active temporary hold for this labor. No second hold was created at ${centerName}; ` +
+        "wait for the existing hold to expire or use its existing booking state."
+      );
+      return true;
+    }
+  }
+
   async function createHold() {
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
     // Only hold the SELECTED session, not every session in the city.
@@ -1194,6 +1220,10 @@ export default function BookingPage() {
       setSiteCity(String(selectedCity));
       setStatus(nextHoldId ? `Hold created for ${selectedCenterOption?.name || `center #${selectedCenterId}`}: #${nextHoldId}` : "Hold created");
     } catch (err: any) {
+      // A temporary-seat `labor_id already taken` means this labor may already
+      // own a hold. Try a read-only same-session/same-centre lookup first; do
+      // not treat it as permission to select another centre.
+      if (await recoverFromLaborIdAlreadyTaken422(err, selectedSessionId)) return;
       const detail = err?.data?.details || err?.details;
       const errorCode = err?.data?.error?.code || err?.data?.code || err?.code;
       const upstreamText = [
@@ -1662,14 +1692,16 @@ export default function BookingPage() {
               <span className="bk-field-label">Available sessions at the selected centre <b>*</b></span>
               <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length} aria-label="Available sessions at the selected centre">
                 <option value="">{loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
-                {filteredSessions.map((item) => {
+                {filteredSessions.map((item, index) => {
                   const sid = getSessionSiteId(item);
                   const realName = getResolvedSessionCenterName(item);
                   const seats = item?.available_seats ?? item?.seats_available ?? item?.remaining_seats ?? null;
                   const dateTimeLabel = formatSessionDateTime(item);
+                  const shiftLabel = getSessionShiftLabel(item, index);
+                  const opaqueId = getSessionId(item);
                   return (
-                    <option key={getSessionId(item)} value={getSessionId(item)}>
-                      {realName}{sid ? ` (Site #${sid})` : ""}{dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""}
+                    <option key={opaqueId} value={opaqueId}>
+                      {shiftLabel} — {realName} (Site #{sid}){dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""}
                     </option>
                   );
                 })}
