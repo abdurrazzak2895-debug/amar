@@ -1185,7 +1185,22 @@ export default function BookingPage() {
       setSiteCity(String(selectedCity));
       setStatus(nextHoldId ? `Hold created for ${selectedCenterOption?.name || `center #${selectedCenterId}`}: #${nextHoldId}` : "Hold created");
     } catch (err: any) {
-      if (!recoverFromNoExamSession422(err)) setError(err?.message || "Failed to create hold");
+      const detail = err?.data?.details || err?.details;
+      const errorCode = err?.data?.error?.code || err?.data?.code || err?.code;
+      const upstreamText = [
+        err?.message,
+        err?.data?.error?.message,
+        detail?.message,
+        detail?.error,
+        detail?.errors?.temporaryseat?.labor_id?.[0],
+      ].filter(Boolean).join(" ");
+      if (!recoverFromNoExamSession422(err)) {
+        if (errorCode === "CANDIDATE_LABOR_ID_EXISTS" || /labor_id.*already been taken/i.test(upstreamText) || /has already been taken/i.test(upstreamText)) {
+          setError("This session is already taken for this candidate. Please try another session.");
+        } else {
+          setError(err?.data?.error?.message || err?.message || "Failed to create hold");
+        }
+      }
     }
     finally { setCreatingHold(false); }
   }
