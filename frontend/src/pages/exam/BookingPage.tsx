@@ -1114,6 +1114,15 @@ export default function BookingPage() {
         `SVP session centre mismatch: selected site ${selectedCenterId}, session belongs to site ${detailCenterId || "unknown"}`
       );
     }
+    const sessionNode = candidates.find((candidate) => candidate && typeof candidate === "object") || detail;
+    const status = String(sessionNode?.status || sessionNode?.state || "").toLowerCase();
+    const availableSeats = sessionNode?.available_seats ?? sessionNode?.seats_available ?? sessionNode?.remaining_seats;
+    if (status && !["scheduled", "active", "available", "open"].includes(status)) {
+      throw { statusCode: 409, code: "SESSION_UNAVAILABLE", message: "Selected session is no longer available" };
+    }
+    if (availableSeats != null && Number(availableSeats) <= 0) {
+      throw { statusCode: 409, code: "SESSION_UNAVAILABLE", message: "Selected session has no available seats" };
+    }
     return detail;
   }
 
@@ -1194,12 +1203,24 @@ export default function BookingPage() {
         detail?.error,
         detail?.errors?.temporaryseat?.labor_id?.[0],
       ].filter(Boolean).join(" ");
-      if (!recoverFromNoExamSession422(err)) {
-        if (errorCode === "CANDIDATE_LABOR_ID_EXISTS" || /labor_id.*already been taken/i.test(upstreamText) || /has already been taken/i.test(upstreamText)) {
-          setError("This session is already taken for this candidate. Please try another session.");
-        } else {
-          setError(err?.data?.error?.message || err?.message || "Failed to create hold");
-        }
+      const sessionUnavailable = errorCode === "SESSION_UNAVAILABLE" ||
+        errorCode === "CANDIDATE_LABOR_ID_EXISTS" ||
+        /labor_id.*already been taken/i.test(upstreamText) ||
+        /has already been taken/i.test(upstreamText);
+      if (sessionUnavailable) {
+        setHoldId("");
+        setHoldExpiresAt("");
+        setReservationId("");
+        setSessionId("");
+        setSessions([]);
+        setSessionDetail(null);
+        setLiveAvailableSeats(null);
+        setSessionRetryNotice("The selected session is no longer available. The session list was refreshed; please choose another session.");
+        setError("");
+        setStatus("Session unavailable — refreshed sessions are ready. Choose another session.");
+        setSessionReloadKey((value) => value + 1);
+      } else if (!recoverFromNoExamSession422(err)) {
+        setError(err?.data?.error?.message || err?.message || "Failed to create hold");
       }
     }
     finally { setCreatingHold(false); }
