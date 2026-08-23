@@ -2,7 +2,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { api, getSession, getBackendUrl, getProxyPrefix } from "@/lib/api";
+import { api, getSession, getBackendUrl, getProxyPrefix, refreshCandidateSession } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { extractTestCenterId } from "@/lib/test-centers";
 import {
@@ -907,17 +907,53 @@ export default function BookingPage() {
       setLoadingSessions(true);
       if (!retryNotice) setError("");
       try {
+        setStatus(`Refreshing SVP authorization and loading sessions for ${selectedCenterOption?.name || `site ${selectedCenterId}`}…`);
+        await refreshCandidateSession();
+        if (!active) return;
+        const expectedCenterId = String(selectedCenterId).trim();
         const params = new URLSearchParams({
           category_id: String(categoryId),
           city: String(selectedCity),
           exam_date: availableDate,
-          test_center_id: String(selectedCenterId),
+          test_center_id: expectedCenterId,
         });
         const data: any = await api(`/exam-sessions?${params.toString()}`);
         if (!active) return;
+        const responseCenterId = String(getSessionSiteId(data) || "").trim();
+        if (responseCenterId && responseCenterId !== expectedCenterId) {
+          throw new Error(`SVP returned site ${responseCenterId} for the selected site ${expectedCenterId}; sessions were blocked.`);
+        }
+        const responseCenterName = getResponseCenterName(data) || selectedCenterOption?.name || `site ${expectedCenterId}`;
         const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
-        setSessions(filterSessionsForCenter(liveSessions, selectedCenterId));
+        const boundSessions = liveSessions.map((item: any) => {
+          const itemCenterId = String(getSessionSiteId(item) || "").trim();
+          if (itemCenterId) return item;
+          // The list response itself is centre-scoped and explicitly identifies
+          // the selected site. Stamp that binding only onto rows lacking their
+          // own ID; never infer a binding from city or a gateway result.
+          if (responseCenterId === expectedCenterId) {
+            const row = item && typeof item === "object" ? item : { id: item };
+            return {
+              ...row,
+              site_id: expectedCenterId,
+              test_center_id: expectedCenterId,
+              test_center_name: responseCenterName,
+              session_binding: {
+                ...(row.session_binding || {}),
+                site_id: expectedCenterId,
+                test_center_id: expectedCenterId,
+                source: "svp_center_scoped_exam_sessions",
+              },
+            };
+          }
+          return null;
+        }).filter(Boolean);
+        const scopedSessions = filterSessionsForCenter(boundSessions, expectedCenterId);
+        setSessions(scopedSessions);
         setSessionRetryNotice("");
+        setStatus(scopedSessions.length
+          ? `${scopedSessions.length} SVP session${scopedSessions.length === 1 ? "" : "s"} loaded for ${responseCenterName} (site ${expectedCenterId}).`
+          : `No SVP exam sessions are available at ${responseCenterName} on ${availableDate}. No other centre will be substituted.`);
       } catch (err: any) {
         if (!active) return;
         setSessions([]);

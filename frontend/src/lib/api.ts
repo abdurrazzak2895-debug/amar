@@ -220,6 +220,28 @@ export async function api<T = any>(
   return callFunction<T>("proxy", path, opts);
 }
 
+/** Refresh the candidate SVP access token before a centre-scoped read. */
+export async function refreshCandidateSession(): Promise<boolean> {
+  const session = getSession();
+  if (!session.refreshToken || !session.sessionId) return false;
+  try {
+    const refreshRes = await doFetch(`${AUTH_BASE}${AUTH_PREFIX}/refresh`, {
+      method: "POST",
+      credentials: AUTH_USES_COOKIES ? "include" : "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: session.sessionId, refreshToken: session.refreshToken }),
+    });
+    if (refreshRes.res.ok && refreshRes.data?.accessToken) {
+      saveSession({ accessToken: refreshRes.data.accessToken });
+      return true;
+    }
+    if (refreshRes.res.status === 401) clearSession();
+  } catch {
+    // The subsequent proxy request may still succeed with the current token.
+  }
+  return false;
+}
+
 // Real calls to the test-center-owner edge function (validate_access, owner-status,
 // test center detail) — backed by the public.test_center_owners table, using the
 // same SVP session/JWT auth as the rest of the app. See supabase/functions/test-center-owner.
