@@ -18,9 +18,40 @@ import {
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
   isNoExamSession422,
 } from "@/lib/booking-utils";
+import { getPortalCenters, getPortalOccupations, getPortalSearchDates } from "@/lib/portal-availability-api";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
 import { useAuth } from "@/contexts/AuthContext";
+
+type PortalCenterAvailability = {
+  siteId: string;
+  name: string;
+  city: string;
+  sessionCount?: number | null;
+  availabilitySlots?: { time: string; seats: number | null }[];
+  availabilitySource?: "portal" | "svp";
+};
+
+function getPortalSlotLabel(center: PortalCenterAvailability): string {
+  const slots = center.availabilitySlots || [];
+  if (!slots.length) return "";
+  const seatValues = slots.map((slot) => slot.seats).filter((seats): seats is number => seats != null && Number.isFinite(seats));
+  const seatLabel = seatValues.length ? ` · Seats ${Math.min(...seatValues)}–${Math.max(...seatValues)}` : "";
+  return ` · ${slots.length} available slot${slots.length === 1 ? "" : "s"}${seatLabel}`;
+}
+
+function normalizePortalOccupation(item: any): any {
+  const languages = Array.isArray(item?.languages) ? item.languages : [];
+  return normalizeOccupation({
+    ...item,
+    id: item?.occupation_id ?? item?.id,
+    category_id: item?.category_id ?? item?.category?.id,
+    prometric_codes: languages.map((language: any) => ({
+      code: language?.code ?? language?.language_code,
+      name: language?.name ?? language?.english_name,
+    })),
+  });
+}
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
@@ -39,8 +70,9 @@ export default function BookingPage() {
   // Section rules — deterministic fallback for sessions whose site_id changes daily.
   const [sectionRules, setSectionRules] = useState<SectionCenterRule[]>([]);
   const [cityCenterOptions, setCityCenterOptions] = useState<{ siteId: string; name: string; city: string }[]>([]);
-  const [dateScopedCenters, setDateScopedCenters] = useState<{ siteId: string; name: string; city: string; sessionCount?: number | null }[] | null>(null);
+  const [dateScopedCenters, setDateScopedCenters] = useState<PortalCenterAvailability[] | null>(null);
   const [loadingCenterAvailability, setLoadingCenterAvailability] = useState(false);
+  const [portalAvailabilitySource, setPortalAvailabilitySource] = useState<"portal" | "svp" | "">("");
   const [selectedOccupationId, setSelectedOccupationId] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [availableDate, setAvailableDate] = useState("");
@@ -174,6 +206,10 @@ export default function BookingPage() {
   const selectedCenterOption = useMemo(
     () => centerOptions.find((item) => String(item.siteId) === String(selectedCenterId)) || null,
     [centerOptions, selectedCenterId]
+  );
+  const selectedPortalCenter = useMemo(
+    () => dateScopedCenters?.find((item) => String(item.siteId) === String(selectedCenterId)) || null,
+    [dateScopedCenters, selectedCenterId]
   );
   const calendarBaseMonth = calendarMonth || (availableDate ? availableDate.slice(0, 7) : normalizeDateValue(new Date().toISOString()).slice(0, 7));
   const calendarCursorDate = useMemo(() => new Date(`${calendarBaseMonth}-01T00:00:00`), [calendarBaseMonth]);
@@ -522,32 +558,53 @@ export default function BookingPage() {
   }
 
   useEffect(() => {
+    let active = true;
     (async () => {
       setLoadingOccupations(true); setError("");
       try {
-        const perPage = 200;
-        const all: any[] = [];
-        let page = 1;
-        // Fetch all pages until we get an empty/short page (max 50 pages safety)
-        for (; page <= 50; page++) {
-          const data = await api(`/occupations?locale=en&per_page=${perPage}&page=${page}`);
-          const arr = pickArray(data);
-          if (!arr.length) break;
-          all.push(...arr);
-          if (arr.length < perPage) break;
+        const portalData: any = await getPortalOccupations();
+        const portalItems = pickArray(portalData);
+        if (portalItems.length) {
+          if (!active) return;
+          const seen = new Set<string>();
+          const normalized = portalItems.map(normalizePortalOccupation).filter((item) => {
+            if (!item.id || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+          setOccupations(normalized);
+          return;
         }
-        // Dedupe by id
-        const seen = new Set<string>();
-        const unique = all.filter((it) => {
-          const k = String(it?.id ?? "");
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        });
-        setOccupations(unique.map(normalizeOccupation));
-      } catch (err: any) { setError(err?.message || "Failed to load occupations"); }
-      finally { setLoadingOccupations(false); }
+        throw new Error("Portal Availability returned no occupations");
+      } catch {
+        try {
+          const perPage = 200;
+          const all: any[] = [];
+          let page = 1;
+          // SVP fallback keeps the existing booking flow usable during a gateway outage.
+          for (; page <= 50; page++) {
+            const data = await api(`/occupations?locale=en&per_page=${perPage}&page=${page}`);
+            const arr = pickArray(data);
+            if (!arr.length) break;
+            all.push(...arr);
+            if (arr.length < perPage) break;
+          }
+          const seen = new Set<string>();
+          const unique = all.filter((it) => {
+            const k = String(it?.id ?? it?.occupation_id ?? "");
+            if (!k || seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+          if (active) setOccupations(unique.map(normalizeOccupation));
+        } catch (err: any) {
+          if (active) setError(err?.message || "Failed to load occupations");
+        }
+      } finally {
+        if (active) setLoadingOccupations(false);
+      }
     })();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -567,16 +624,19 @@ export default function BookingPage() {
   useEffect(() => {
     if (!selectedOccupation) return;
     setCategoryId(String(selectedOccupation.categoryId || ""));
-    setLanguageCode((prev) => prev || String(selectedOccupation.languageCodes[0]?.code || ""));
+    setLanguageCode((prev) => prev || String(
+      selectedOccupation.languageCodes.find((item) => item.code === "LOABB")?.code ||
+      selectedOccupation.languageCodes[0]?.code || ""
+    ));
     setMethodology(String(selectedOccupation.methodology || "in_person"));
     setSelectedCity(""); setAvailableDate(""); setAvailableDateEntries([]); setLiveCityOptions([]); setSessions([]);
-    setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false);
+    setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false); setPortalAvailabilitySource("");
     setSelectedCenterId(""); setSessionId(""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
   }, [selectedOccupation]);
 
   useEffect(() => {
-    setAvailableDate(""); setSessions([]); setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false); setSelectedCenterId(""); setSessionId("");
+    setAvailableDate(""); setSessions([]); setCityCenterOptions([]); setDateScopedCenters(null); setLoadingCenterAvailability(false); setPortalAvailabilitySource(""); setSelectedCenterId(""); setSessionId("");
     setSiteId(""); setSiteCity(selectedCity || ""); setHoldId(""); setHoldExpiresAt(""); setReservationId("");
     setPaymentSession(null);
     if (selectedCity) setStatus(`City selected: ${selectedCity}. Loading sessions for the selected date.`);
@@ -593,21 +653,46 @@ export default function BookingPage() {
     (async () => {
       if (!selectedOccupationId) { setAvailableDateEntries([]); setAvailableDate(""); return; }
       setLoadingDates(true); setError("");
+      const startFrom = normalizeDateValue(new Date().toISOString());
       try {
-        const params = new URLSearchParams({
-          per_page: "1000", category_id: String(categoryId),
-          start_at_date_from: normalizeDateValue(new Date().toISOString()),
-          available_seats: "greater_than::0", status: "scheduled", locale: "en",
+        const portalData: any = await getPortalSearchDates({
+          category_id: Number(categoryId),
+          start_from: startFrom,
         });
-        const data = await api(`/available-dates?${params.toString()}`);
+        const portalEntries = normalizeAvailableDateEntries(
+          Array.isArray(portalData?.dates) ? portalData.dates : pickArray(portalData)
+        );
+        if (!portalEntries.length) throw new Error("Portal Availability returned no dates");
         if (!active) return;
-        const entries = normalizeAvailableDateEntries(pickArray(data));
-        const cities = buildCityOptions(entries);
+        const cities = buildCityOptions(portalEntries);
+        setPortalAvailabilitySource("portal");
         setLiveCityOptions(cities);
-        setAvailableDateEntries(entries);
+        setAvailableDateEntries(portalEntries);
         setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || ""));
-      } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(err?.message || "Failed to load available dates"); }
-      finally { if (active) setLoadingDates(false); }
+      } catch {
+        try {
+          const params = new URLSearchParams({
+            per_page: "1000", category_id: String(categoryId),
+            start_at_date_from: startFrom,
+            available_seats: "greater_than::0", status: "scheduled", locale: "en",
+          });
+          const data = await api(`/available-dates?${params.toString()}`);
+          if (!active) return;
+          const entries = normalizeAvailableDateEntries(pickArray(data));
+          const cities = buildCityOptions(entries);
+          setPortalAvailabilitySource("svp");
+          setLiveCityOptions(cities);
+          setAvailableDateEntries(entries);
+          setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || ""));
+        } catch (err: any) {
+          if (!active) return;
+          setPortalAvailabilitySource("");
+          setAvailableDateEntries([]);
+          setError(err?.message || "Failed to load available dates");
+        }
+      } finally {
+        if (active) setLoadingDates(false);
+      }
     })();
     return () => { active = false; };
   }, [selectedOccupationId, categoryId]);
@@ -624,6 +709,7 @@ export default function BookingPage() {
     setSessions([]);
     setDateScopedCenters(null);
     setLoadingCenterAvailability(false);
+    setPortalAvailabilitySource("");
     setSessionId("");
     setSiteId(selectedCenterId || "");
     setSiteCity(selectedCity || "");
@@ -705,74 +791,107 @@ export default function BookingPage() {
     return () => { active = false; };
   }, [selectedCity]);
 
-  // The available-dates endpoint is city-level. Before the user chooses a
-  // centre, check every real centre for the selected date and retain only
-  // centres with a positive official SVP session count.
+  // The Portal Availability Gateway provides the date-scoped centre/seat view.
+  // It is advisory only: the separate SVP session request below remains the
+  // source of the opaque exam-session ID used by holds and reservations.
   useEffect(() => {
     let active = true;
     (async () => {
-      if (!selectedCity || !availableDate || !categoryId) {
+      if (!selectedCity || !availableDate || !categoryId || !selectedOccupationId) {
         setDateScopedCenters(null);
         setLoadingCenterAvailability(false);
         return;
       }
       setLoadingCenterAvailability(true);
       try {
-        // Use the official centre-scoped session route directly. The optimized
-        // `/center-session-availability` route is optional server-side code and
-        // may not be deployed with the frontend; a missing route must never be
-        // interpreted as zero availability. Each centre is therefore checked
-        // independently through the already-live `/exam-sessions` contract.
-        // Load the complete city centre roster first; occupation category is
-        // applied only when checking each centre's date-scoped sessions.
-        const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
+        const requestedLanguage = languageCode || selectedOccupation?.languageCodes.find((item) => item.code === "LOABB")?.code || "LOABB";
+        const portalData: any = await getPortalCenters({
+          category_id: Number(categoryId),
           city: String(selectedCity),
-          country_id: "78",
-        }).toString()}`);
-        const centers = Array.isArray(centerPayload?.test_centers)
-          ? centerPayload.test_centers
-          : Array.isArray(centerPayload?.centers)
-            ? centerPayload.centers
-            : pickArray(centerPayload);
-        const verifiedCenters = mergeVerifiedCityCenterRoster(centers, selectedCity, "78");
-        const rawCenters: any[] = await Promise.all(verifiedCenters.map(async (center: any) => {
-          const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
-          if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
-          try {
-            const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
-              category_id: String(categoryId),
-              city: String(selectedCity),
-              exam_date: availableDate,
-              test_center_id: siteId,
-              country_id: "78",
-              available_seats: "greater_than::0",
-            }).toString()}`);
-            const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
-            return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
-          } catch {
-            return { ...center, session_count: 0, lookup_status: "error" };
+          date: availableDate,
+          occupation_id: Number(selectedOccupationId),
+          language_code: requestedLanguage,
+        });
+        const portalCenters = Array.isArray(portalData?.centers) ? portalData.centers : [];
+        const bySiteId = new Map<string, PortalCenterAvailability>();
+        portalCenters.forEach((center: any) => {
+          const siteId = String(center?.test_center_id ?? center?.site_id ?? center?.id ?? "").trim();
+          const name = String(center?.test_center_name ?? center?.name ?? center?.title ?? "").trim();
+          const seats = center?.available_seats ?? center?.seats_available ?? center?.remaining_seats ?? null;
+          if (!siteId || !name || (seats != null && Number(seats) <= 0)) return;
+          const nextSlot = { time: String(center?.test_time ?? center?.time ?? "").trim(), seats: seats == null ? null : Number(seats) };
+          const existing = bySiteId.get(siteId);
+          if (existing) {
+            existing.availabilitySlots = [...(existing.availabilitySlots || []), nextSlot];
+          } else {
+            bySiteId.set(siteId, {
+              siteId,
+              name,
+              city: String(center?.city ?? selectedCity).trim(),
+              sessionCount: 1,
+              availabilitySlots: [nextSlot],
+              availabilitySource: "portal",
+            });
           }
-        }));
-
+        });
         if (!active) return;
-        const normalized = rawCenters.map((center: any) => ({
-          siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
-          name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
-          city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
-          sessionCount: Number(center.session_count ?? 0),
-        })).filter((center: any) => center.siteId && center.name);
-        setDateScopedCenters(normalized);
-      } catch (err: any) {
-        if (!active) return;
-        // Do not offer unverified centres after both lookup paths fail.
-        setDateScopedCenters([]);
-        setError(err?.message || "Failed to check centre availability for the selected date");
+        setPortalAvailabilitySource("portal");
+        setDateScopedCenters(Array.from(bySiteId.values()).sort((a, b) => a.name.localeCompare(b.name)));
+        return;
+      } catch {
+        // If the availability gateway is temporarily unavailable, retain the
+        // verified SVP centre/date lookup as a fallback. It never creates a
+        // booking binding and never substitutes another centre.
+        try {
+          const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
+            city: String(selectedCity),
+            country_id: "78",
+          }).toString()}`);
+          const centers = Array.isArray(centerPayload?.test_centers)
+            ? centerPayload.test_centers
+            : Array.isArray(centerPayload?.centers)
+              ? centerPayload.centers
+              : pickArray(centerPayload);
+          const verifiedCenters = mergeVerifiedCityCenterRoster(centers, selectedCity, "78");
+          const rawCenters: any[] = await Promise.all(verifiedCenters.map(async (center: any) => {
+            const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
+            if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
+            try {
+              const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
+                category_id: String(categoryId),
+                city: String(selectedCity),
+                exam_date: availableDate,
+                test_center_id: siteId,
+                country_id: "78",
+                available_seats: "greater_than::0",
+              }).toString()}`);
+              const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
+              return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
+            } catch {
+              return { ...center, session_count: 0, lookup_status: "error" };
+            }
+          }));
+          if (!active) return;
+          setPortalAvailabilitySource("svp");
+          setDateScopedCenters(rawCenters.map((center: any) => ({
+            siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
+            name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
+            city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
+            sessionCount: Number(center.session_count ?? 0),
+            availabilitySource: "svp",
+          })).filter((center: PortalCenterAvailability) => center.siteId && center.name));
+        } catch (err: any) {
+          if (!active) return;
+          setPortalAvailabilitySource("");
+          setDateScopedCenters([]);
+          setError(err?.message || "Failed to check centre availability for the selected date");
+        }
       } finally {
         if (active) setLoadingCenterAvailability(false);
       }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId]);
+  }, [selectedCity, availableDate, categoryId, selectedOccupationId, languageCode, selectedOccupation]);
 
   // Sessions are always requested with the exact selected center ID. This is
   // the key protection against mixing several centers in one city.
@@ -1675,12 +1794,17 @@ export default function BookingPage() {
               <span className="bk-field-label">Live SVP test centre <b>*</b></span>
               <select value={selectedCenterId} onChange={(e) => handleCenterChange(e.target.value)} disabled={!centerOptions.length || loadingCenterAvailability}>
                 <option value="">{loadingCenterAvailability ? "Checking centres for this date…" : loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
-                {centerOptions.map((item) => <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}</option>)}
+                {centerOptions.map((item) => {
+                  const availability = dateScopedCenters?.find((center) => String(center.siteId) === String(item.siteId));
+                  return <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}{availability ? getPortalSlotLabel(availability) : ""}</option>;
+                })}
               </select>
-              {loadingCenterAvailability ? <small className="bk-date-help">Checking official SVP session availability for {formatDateLabel(availableDate)}. Only centres with sessions will remain selectable.</small> : null}
+              {loadingCenterAvailability ? <small className="bk-date-help">Loading live centre availability for {formatDateLabel(availableDate)}…</small> : null}
+              {!loadingCenterAvailability && portalAvailabilitySource === "portal" && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Portal availability is live for this date. Centre times and seats are advisory; the SVP session list below remains the only booking authority.</small> : null}
               {!loadingCenterAvailability && dateScopedCenters !== null && !centerOptions.length ? <small className="bk-error-text">No test centre has an available SVP session for {formatDateLabel(availableDate)} in {selectedCity}. Try another date.</small> : null}
               {!loadingCenterAvailability && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Only test centres with an available session on the selected date are shown.</small> : null}
               {selectedCenterOption ? <small className="bk-date-help">Live centre: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
+              {selectedPortalCenter?.availabilitySlots?.length ? <small className="bk-date-help">Gateway slots: {selectedPortalCenter.availabilitySlots.map((slot) => `${slot.time || "Time pending"} (${slot.seats == null ? "seats pending" : `${slot.seats} seats`})`).join(" · ")}</small> : null}
               {selectedCenterOption && availableDate ? (
                 <small className="bk-date-help">
                   Selected-centre only: a seat can be secured only at {selectedCenterOption.name} on {formatDateLabel(availableDate)}. If that centre has no session on this date, booking stops—no other centre or session is substituted.
@@ -1739,6 +1863,7 @@ export default function BookingPage() {
             <div className="bk-meta-row"><span>Reservation credits</span><strong>{loadingBalance ? "-" : bookingMode.reservationCredits}</strong></div>
             <div className="bk-meta-row"><span>Free certificates</span><strong>{loadingBalance ? "-" : bookingMode.freeCertificates}</strong></div>
             <div className="bk-meta-row"><span>Available seats</span><strong>{loadingSeats ? "Loading…" : (liveAvailableSeats !== null ? liveAvailableSeats : (selectedSession ? (selectedSession.available_seats ?? selectedSession.seats_available ?? "-") : "-"))}</strong></div>
+            <div className="bk-meta-row"><span>Portal centre seats</span><strong>{selectedPortalCenter?.availabilitySlots?.length ? selectedPortalCenter.availabilitySlots.map((slot) => `${slot.time || "slot"}: ${slot.seats == null ? "—" : slot.seats}`).join(" · ") : "-"}</strong></div>
             <div className="bk-meta-row"><span>City</span><strong>{siteCity || selectedCity || "-"}</strong></div>
             <div className="bk-meta-row"><span>Site ID</span><strong>{siteId || "-"}</strong></div>
             <div className="bk-meta-row"><span>Selected centre ID</span><strong>{selectedCenterId || siteId || "-"}</strong></div>

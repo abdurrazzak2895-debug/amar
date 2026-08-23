@@ -64,7 +64,7 @@ The active Amar SVP booking page continues to use the separate centre-scoped SVP
 
 ## Frontend client
 
-`frontend/src/lib/portal-availability-api.ts` provides browser-safe wrappers for the three Amar routes. When `VITE_SUPABASE_URL` is present, it calls the deployed Supabase function; otherwise it falls back to `VITE_BACKEND_URL`. It sends Amar access credentials only to the server-side route and does not know or accept `PORTAL_AVAILABILITY_API_KEY`.
+`frontend/src/lib/portal-availability-api.ts` provides browser-safe wrappers for the three Amar routes. When `VITE_SUPABASE_URL` is present, it calls the deployed Supabase function; otherwise it falls back to `VITE_BACKEND_URL`. `BookingPage.tsx` now uses the gateway-first occupation → date/city → centre/seat cascade for display, while it still requests the selected centre’s opaque SVP sessions separately before any hold or reservation. It sends Amar access credentials only to the server-side route and does not know or accept `PORTAL_AVAILABILITY_API_KEY`.
 
 The wrappers are:
 
@@ -87,4 +87,4 @@ The backend preserves the upstream status and message in the normal Express erro
 
 ## Verification performed
 
-Backend contract tests cover default gateway configuration, whitelist payload normalization, Prometric language-code enforcement, server-only API-key forwarding, successful `{ success: true, data }` envelopes, and upstream error propagation. The Supabase function `portal-availability-proxy` was deployed to project `xklwzkraobxetxdcysun` as version 1. An unauthenticated smoke request returned the expected HTTP 401, confirming the function boundary is reachable; a real gateway availability call remains pending until `PORTAL_AVAILABILITY_API_KEY` is added to Supabase secrets. No live gateway key is stored in this repository, and no booking operation is part of this integration.
+Backend contract tests cover default gateway configuration, whitelist payload normalization, Prometric language-code enforcement, server-only API-key forwarding, successful `{ success: true, data }` envelopes, and upstream error propagation. The Supabase function `portal-availability-proxy` was deployed to project `xklwzkraobxetxdcysun` as version 1. Authenticated live checks returned HTTP 200 for occupations, search dates, and centres; the centre response correctly returned the gateway’s availability-only centre names, times, and seat counts. No live gateway key is stored in this repository, and no booking operation is part of this integration.
