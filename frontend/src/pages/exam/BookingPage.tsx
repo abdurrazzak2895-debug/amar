@@ -529,6 +529,22 @@ export default function BookingPage() {
     return "";
   }
 
+  function normalizeClockTime(value: unknown): string {
+    const raw = String(value || "").trim().toUpperCase().replace(/\./g, "");
+    const match = raw.match(/^(\d{1,2}):?(\d{2})\s*(AM|PM)?$/);
+    if (!match) return raw;
+    let hours = Number(match[1]);
+    const minutes = match[2];
+    const suffix = match[3];
+    if (suffix === "PM" && hours < 12) hours += 12;
+    if (suffix === "AM" && hours === 12) hours = 0;
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+
+  function getComparableSessionTime(item: any): string {
+    return normalizeClockTime(getSessionTimeRaw(item) || findSessionTimeInText(item));
+  }
+
   function formatSessionDateTime(item: any): string {
     const dateTimeRaw = getSessionDateTimeRaw(item);
     const timezoneOffset = String(item?.tc_time_zone_offset || item?.exam_session?.tc_time_zone_offset || "").trim();
@@ -975,12 +991,41 @@ export default function BookingPage() {
           }
           return null;
         }).filter(Boolean);
-        const scopedSessions = filterSessionsForCenter(boundSessions, expectedCenterId);
+        let scopedSessions = filterSessionsForCenter(boundSessions, expectedCenterId);
+        const portalSlots = dateScopedCenters?.find((center) => String(center.siteId) === expectedCenterId)?.availabilitySlots || [];
+        let sessionMatchNotice = "";
+        if (portalSlots.length) {
+          const portalSessionIds = new Set(portalSlots.map((slot) => String(slot.examSessionId || "").trim()).filter(Boolean));
+          if (portalSessionIds.size) {
+            scopedSessions = scopedSessions.filter((item) => portalSessionIds.has(String(getSessionId(item) || "").trim()));
+          } else {
+            // If the gateway omits IDs, match by the exact published time using
+            // a multiset so two slots at one centre produce exactly two rows.
+            const remainingTimes = new Map<string, number>();
+            portalSlots.forEach((slot) => {
+              const key = normalizeClockTime(slot.time);
+              if (key) remainingTimes.set(key, (remainingTimes.get(key) || 0) + 1);
+            });
+            scopedSessions = scopedSessions.filter((item) => {
+              const key = getComparableSessionTime(item);
+              const remaining = key ? (remainingTimes.get(key) || 0) : 0;
+              if (!remaining) return false;
+              remainingTimes.set(key, remaining - 1);
+              return true;
+            });
+          }
+          if (scopedSessions.length !== portalSlots.length) {
+            scopedSessions = [];
+            sessionMatchNotice = "Portal slots were not fully matched to centre-scoped SVP sessions; booking is blocked until the selected centre is verified.";
+          }
+        }
         setSessions(scopedSessions);
-        setSessionRetryNotice("");
+        setSessionRetryNotice(sessionMatchNotice);
         setStatus(scopedSessions.length
           ? `${scopedSessions.length} SVP session${scopedSessions.length === 1 ? "" : "s"} loaded for ${responseCenterName} (site ${expectedCenterId}).`
-          : `No SVP exam sessions are available at ${responseCenterName} on ${availableDate}. No other centre will be substituted.`);
+          : portalSlots.length
+            ? `Portal reported ${portalSlots.length} slot${portalSlots.length === 1 ? "" : "s"}, but SVP did not return the same centre sessions. No other centre will be substituted.`
+            : `No SVP exam sessions are available at ${responseCenterName} on ${availableDate}. No other centre will be substituted.`);
       } catch (err: any) {
         if (!active) return;
         setSessions([]);
@@ -989,7 +1034,7 @@ export default function BookingPage() {
       finally { if (active) setLoadingSessions(false); }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId, selectedCenterId, sessionReloadKey]);
+  }, [selectedCity, availableDate, categoryId, selectedCenterId, sessionReloadKey, dateScopedCenters]);
 
   // Legacy local center mappings are intentionally not used for the live SVP
   // selection path. The live proxy enriches every center-scoped session with
