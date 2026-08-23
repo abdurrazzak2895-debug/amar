@@ -1218,10 +1218,21 @@ export default function BookingPage() {
   }, [centerOptions, selectedCenterId]);
 
   useEffect(() => {
-    if (!filteredSessions.length) { setSessionId(""); return; }
-    const hasSelected = filteredSessions.some((item) => String(getSessionId(item)) === String(sessionId));
-    if (!sessionId || !hasSelected) setSessionId(String(getSessionId(filteredSessions[0])));
-  }, [filteredSessions, sessionId]);
+    if (!selectedCenterId) {
+      if (sessionId) setSessionId("");
+      return;
+    }
+    // Do not clear a clicked Portal slot merely because the centre-scoped SVP
+    // list is temporarily empty or uses a different response envelope. The
+    // card remains visibly selected; the hold handler still performs the final
+    // SVP centre/session verification before any write.
+    if (!filteredSessions.length) return;
+    const hasSelectedSvpSession = filteredSessions.some((item) => String(getSessionId(item)) === String(sessionId));
+    const hasSelectedPortalSlot = Boolean(
+      selectedPortalCenter?.availabilitySlots?.some((slot) => String(slot.examSessionId || "").trim() === String(sessionId || "").trim())
+    );
+    if (sessionId && !hasSelectedSvpSession && !hasSelectedPortalSlot) setSessionId("");
+  }, [filteredSessions, selectedCenterId, selectedPortalCenter, sessionId]);
 
   useEffect(() => {
     if (selectedCenterOption) { setSiteId(String(selectedCenterOption.siteId || "")); setSiteCity(String(selectedCenterOption.city || "")); }
@@ -1993,7 +2004,12 @@ export default function BookingPage() {
                 </select>
               )}
               {sessionId && selectedPortalSlot ? (
-                <small className="bk-date-help">Selected one session: {selectedPortalCenter?.name} · {selectedPortalSlot.time || "Time pending"} · {selectedPortalSlot.seats == null ? "Seats pending" : `${selectedPortalSlot.seats} seats`} · Session ID {selectedPortalSlot.examSessionId}</small>
+                <div className="bk-selected-session-note">
+                  <small className="bk-date-help">Selected one session: {selectedPortalCenter?.name} · {formatDateLabel(availableDate)} · {selectedPortalSlot.time || "Time pending"} · {selectedPortalSlot.seats == null ? "Seats pending" : `${selectedPortalSlot.seats} seats`} · Session ID {selectedPortalSlot.examSessionId}</small>
+                  <button className="bk-btn bk-btn--ghost" type="button" onClick={createHold} disabled={creatingHold || !selectedCenterId || !sessionId || Boolean(sessionCenterConflict)}>
+                    {creatingHold ? "Creating hold…" : "Create hold for this session"}
+                  </button>
+                </div>
               ) : null}
               {sessionCenterConflict ? (
                 <small className="bk-error-text">
