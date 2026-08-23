@@ -23,12 +23,21 @@ import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
 import { useAuth } from "@/contexts/AuthContext";
 
+type PortalAvailabilitySlot = {
+  time: string;
+  seats: number | null;
+  examSessionId?: string;
+  payableId?: string;
+  userId?: string;
+  categoryId?: string;
+};
+
 type PortalCenterAvailability = {
   siteId: string;
   name: string;
   city: string;
   sessionCount?: number | null;
-  availabilitySlots?: { time: string; seats: number | null }[];
+  availabilitySlots?: PortalAvailabilitySlot[];
   availabilitySource?: "portal" | "svp";
 };
 
@@ -211,6 +220,15 @@ export default function BookingPage() {
     () => dateScopedCenters?.find((item) => String(item.siteId) === String(selectedCenterId)) || null,
     [dateScopedCenters, selectedCenterId]
   );
+  const portalSlotBySessionId = useMemo(() => {
+    const map = new Map<string, PortalAvailabilitySlot>();
+    dateScopedCenters?.forEach((center) => {
+      center.availabilitySlots?.forEach((slot) => {
+        if (slot.examSessionId) map.set(String(slot.examSessionId), slot);
+      });
+    });
+    return map;
+  }, [dateScopedCenters]);
   const calendarBaseMonth = calendarMonth || (availableDate ? availableDate.slice(0, 7) : normalizeDateValue(new Date().toISOString()).slice(0, 7));
   const calendarCursorDate = useMemo(() => new Date(`${calendarBaseMonth}-01T00:00:00`), [calendarBaseMonth]);
   const calendarYear = calendarCursorDate.getFullYear();
@@ -818,11 +836,20 @@ export default function BookingPage() {
           const siteId = String(center?.test_center_id ?? center?.site_id ?? center?.id ?? "").trim();
           const name = String(center?.test_center_name ?? center?.name ?? center?.title ?? "").trim();
           const seats = center?.available_seats ?? center?.seats_available ?? center?.remaining_seats ?? null;
+          const examSessionId = String(center?.exam_session_id ?? center?.examSessionId ?? center?.session_id ?? "").trim();
           if (!siteId || !name || (seats != null && Number(seats) <= 0)) return;
-          const nextSlot = { time: String(center?.test_time ?? center?.time ?? "").trim(), seats: seats == null ? null : Number(seats) };
+          const nextSlot: PortalAvailabilitySlot = {
+            time: String(center?.test_time ?? center?.time ?? "").trim(),
+            seats: seats == null ? null : Number(seats),
+            ...(examSessionId ? { examSessionId } : {}),
+            ...(center?.payable_id != null ? { payableId: String(center.payable_id) } : {}),
+            ...(center?.user_id != null ? { userId: String(center.user_id) } : {}),
+            ...(center?.category_id != null ? { categoryId: String(center.category_id) } : {}),
+          };
           const existing = bySiteId.get(siteId);
           if (existing) {
             existing.availabilitySlots = [...(existing.availabilitySlots || []), nextSlot];
+            existing.sessionCount = existing.availabilitySlots.length;
           } else {
             bySiteId.set(siteId, {
               siteId,
@@ -1844,7 +1871,17 @@ export default function BookingPage() {
               {!loadingCenterAvailability && dateScopedCenters !== null && !centerOptions.length ? <small className="bk-error-text">No test centre has an available SVP session for {formatDateLabel(availableDate)} in {selectedCity}. Try another date.</small> : null}
               {!loadingCenterAvailability && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Only test centres with an available session on the selected date are shown.</small> : null}
               {selectedCenterOption ? <small className="bk-date-help">Live centre: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
-              {selectedPortalCenter?.availabilitySlots?.length ? <small className="bk-date-help">Gateway slots: {selectedPortalCenter.availabilitySlots.map((slot) => `${slot.time || "Time pending"} (${slot.seats == null ? "seats pending" : `${slot.seats} seats`})`).join(" · ")}</small> : null}
+              {selectedPortalCenter?.availabilitySlots?.length ? (
+                <div className="bk-date-help">
+                  <strong>Portal sessions at this centre:</strong>
+                  {selectedPortalCenter.availabilitySlots.map((slot, index) => (
+                    <div key={`${slot.examSessionId || "slot"}-${index}`}>
+                      {slot.time || "Time pending"} · {slot.seats == null ? "Seats pending" : `${slot.seats} seats`} · Session ID: {slot.examSessionId || "SVP session ID pending"}
+                    </div>
+                  ))}
+                  <div>These are availability records. Amar still verifies the selected opaque session through the centre-scoped SVP session request before booking.</div>
+                </div>
+              ) : null}
               {selectedCenterOption && availableDate ? (
                 <small className="bk-date-help">
                   Selected-centre only: a seat can be secured only at {selectedCenterOption.name} on {formatDateLabel(availableDate)}. If that centre has no session on this date, booking stops—no other centre or session is substituted.
@@ -1859,13 +1896,14 @@ export default function BookingPage() {
                 {filteredSessions.map((item, index) => {
                   const sid = getSessionSiteId(item);
                   const realName = getResolvedSessionCenterName(item);
-                  const seats = item?.available_seats ?? item?.seats_available ?? item?.remaining_seats ?? null;
-                  const dateTimeLabel = formatSessionDateTime(item);
-                  const shiftLabel = getSessionShiftLabel(item, index);
                   const opaqueId = getSessionId(item);
+                  const portalSlot = portalSlotBySessionId.get(opaqueId);
+                  const seats = portalSlot?.seats ?? item?.available_seats ?? item?.seats_available ?? item?.remaining_seats ?? null;
+                  const dateTimeLabel = portalSlot?.time || formatSessionDateTime(item);
+                  const shiftLabel = getSessionShiftLabel(item, index);
                   return (
                     <option key={opaqueId} value={opaqueId}>
-                      {shiftLabel} — {realName} (Site #{sid}){dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""}
+                      {shiftLabel} — {realName} (Site #{sid}){dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""} | Session ID: {opaqueId}
                     </option>
                   );
                 })}
