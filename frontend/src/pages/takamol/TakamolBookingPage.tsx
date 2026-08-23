@@ -20,6 +20,26 @@ function normalizeSessions(raw: any): any[] {
   return raw.sessions || raw.dates || raw.data || [];
 }
 
+function getCenterId(value: any): string {
+  return String(value?.test_center_id ?? value?.site_id ?? value?.center_id ?? value?.id ?? value?.test_center?.site_id ?? value?.test_center?.id ?? "").trim();
+}
+
+function getCenterName(value: any): string {
+  return String(value?.test_center_name ?? value?.name ?? value?.center_name ?? value?.test_center?.test_center_name ?? value?.test_center?.name ?? "").trim();
+}
+
+function getSessionId(value: any): string {
+  return String(value?.exam_session_id ?? value?.session_id ?? value?.sessionId ?? value?.id ?? "").trim();
+}
+
+function getSessionCenterName(value: any): string {
+  return getCenterName(value) || String(value?.test_center?.city ?? value?.city ?? "").trim();
+}
+
+function getSessionTime(value: any): string {
+  return String(value?.test_time ?? value?.time ?? value?.start_time ?? value?.start_date ?? value?.start_date_in_browser_time_zone ?? "").trim();
+}
+
 export default function TakamolBookingPage() {
   const { loggedIn, refresh } = useTakamolAuth();
   const [searchParams] = useSearchParams();
@@ -29,6 +49,7 @@ export default function TakamolBookingPage() {
 
   const [datesRes, setDatesRes] = useState<TakamolDatesResult | null>(null);
   const [centers, setCenters] = useState<TakamolCenter[]>([]);
+  const [selectedCenterId, setSelectedCenterId] = useState("");
   const [city, setCity] = useState("");
   const [date, setDate] = useState("");
   const [sessions, setSessions] = useState<any[]>([]);
@@ -52,6 +73,30 @@ export default function TakamolBookingPage() {
     [categories, categoryId]
   );
 
+  const centerGroups = useMemo(() => {
+    const groups = new Map<string, { id: string; name: string; city: string; slots: TakamolCenter[] }>();
+    centers.forEach((center) => {
+      const id = getCenterId(center);
+      const name = getCenterName(center);
+      if (!id || !name) return;
+      const key = id;
+      const existing = groups.get(key);
+      if (existing) existing.slots.push(center);
+      else groups.set(key, { id, name, city: String(center.city || city).trim(), slots: [center] });
+    });
+    return Array.from(groups.values());
+  }, [centers, city]);
+
+  const selectedCenter = useMemo(
+    () => centerGroups.find((center) => center.id === selectedCenterId) || null,
+    [centerGroups, selectedCenterId]
+  );
+
+  const selectedSessions = useMemo(() => {
+    if (!selectedCenterId) return [];
+    return sessions.filter((session) => getCenterId(session) === selectedCenterId);
+  }, [sessions, selectedCenterId]);
+
   const cities = useMemo(() => datesRes?.cities || [], [datesRes]);
   const dateRows = useMemo(() => datesRes?.dates || [], [datesRes]);
   const loadCategories = useCallback(async () => {
@@ -73,6 +118,7 @@ export default function TakamolBookingPage() {
       setCategoryId(id);
       setDatesRes(null);
       setCenters([]);
+      setSelectedCenterId("");
       setCity("");
       setDate("");
       setSessions([]);
@@ -85,7 +131,9 @@ export default function TakamolBookingPage() {
         if (city) body.city = city;
         const [d, c] = await Promise.all([getDates(body), getCenters(body)]);
         setDatesRes(d);
-        setCenters(c?.centers || (Array.isArray(c) ? c : []));
+        const nextCenters = c?.centers || (Array.isArray(c) ? c : []);
+        setCenters(nextCenters);
+        setSelectedCenterId("");
       } catch (err: any) {
         setError(err?.message || "Failed to load dates/centers");
       } finally {
@@ -101,19 +149,26 @@ export default function TakamolBookingPage() {
     setError(null);
     setOk(null);
     try {
+      if (!selectedCenterId) {
+        setSessions([]);
+        setError("Select a test centre first; sessions from other centres are hidden.");
+        return;
+      }
       const body: Record<string, unknown> = {
         category_id: Number(categoryId),
         exam_date: date,
+        test_center_id: Number.isFinite(Number(selectedCenterId)) ? Number(selectedCenterId) : selectedCenterId,
       };
       if (city) body.city = city;
       const res = await getSessions(body);
-      setSessions(normalizeSessions(res));
+      const centreSessions = normalizeSessions(res).filter((session) => getCenterId(session) === selectedCenterId);
+      setSessions(centreSessions);
     } catch (err: any) {
       setError(err?.message || "Failed to load sessions");
     } finally {
       setBusy(false);
     }
-  }, [categoryId, city, date]);
+  }, [categoryId, city, date, selectedCenterId]);
 
   const submitReservation = useCallback(async () => {
     if (!form.session_id || !form.passport_number) {
@@ -190,24 +245,40 @@ export default function TakamolBookingPage() {
         ) : !categoryId ? (
           <div className="tk-empty">Select a category first.</div>
         ) : (
-          <div className="tk-grid tk-grid-2">
+          <>
+            <div className="tk-grid tk-grid-3">
             <div className="tk-field">
               <label><MapPin size={13} style={{ verticalAlign: "-2px" }} /> City</label>
-              <select value={city} onChange={(e) => setCity(e.target.value)}>
+              <select value={city} onChange={(e) => { setCity(e.target.value); setSelectedCenterId(""); setSessions([]); }}>
                 <option value="">— Any city —</option>
                 {cities.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
-                {centers.map((ctr) => (
-                  <option key={`ctr-${ctr.id ?? ctr.name ?? ctr.city}`} value={ctr.city || ctr.name}>
-                    {(ctr.name || ctr.city || "Center")}
-                  </option>
-                ))}
               </select>
             </div>
             <div className="tk-field">
+              <label><MapPin size={13} style={{ verticalAlign: "-2px" }} /> Test centre</label>
+              <select
+                value={selectedCenterId}
+                onChange={(e) => { setSelectedCenterId(e.target.value); setSessions([]); setForm((prev) => ({ ...prev, session_id: "" })); }}
+                disabled={!centerGroups.length}
+              >
+                <option value="">— Select one centre —</option>
+                {centerGroups
+                  .filter((center) => !city || !center.city || center.city.toLowerCase() === city.toLowerCase())
+                  .map((center) => (
+                    <option key={center.id} value={center.id}>
+                      {center.name} — Site #{center.id} · {center.slots.length} available slot{center.slots.length === 1 ? "" : "s"}
+                    </option>
+                  ))}
+              </select>
+              {selectedCenter && (
+                <small className="tk-help">Selected centre only: {selectedCenter.name} — Site #{selectedCenter.id}. Other-centre sessions are hidden.</small>
+              )}
+            </div>
+            <div className="tk-field">
               <label><CalendarDays size={13} style={{ verticalAlign: "-2px" }} /> Exam date</label>
-              <select value={date} onChange={(e) => setDate(e.target.value)}>
+              <select value={date} onChange={(e) => { setDate(e.target.value); setSessions([]); setForm((prev) => ({ ...prev, session_id: "" })); }}>
                 <option value="">— Pick date —</option>
                 {dateRows.map((d: any, i: number) => {
                   const val = d?.date || d?.exam_date || d?.start_date || d?.value || String(d);
@@ -216,6 +287,15 @@ export default function TakamolBookingPage() {
               </select>
             </div>
           </div>
+          {selectedCenter && (
+            <div className="tk-msg tk-msg--info">
+              <strong>{selectedCenter.name} — Site #{selectedCenter.id}</strong>: {selectedCenter.slots.length} available slot{selectedCenter.slots.length === 1 ? "" : "s"}.
+              {selectedCenter.slots.map((slot, index) => (
+                <span key={`${getSessionId(slot) || "slot"}-${index}`}> {getSessionTime(slot) || "Time pending"}{getSessionId(slot) ? ` · Session ID: ${getSessionId(slot)}` : ""}{index < selectedCenter.slots.length - 1 ? " ·" : ""}</span>
+              ))}
+            </div>
+          )}
+          </>
         )}
         {!loading && !datesRes && categoryId && (
           <div className="tk-msg tk-msg--info">
@@ -227,22 +307,24 @@ export default function TakamolBookingPage() {
       <div className="tk-card">
         <div className="tk-card-header">
           <h2><Clock size={17} style={{ verticalAlign: "-3px", marginRight: 7 }} />Step 3 · Sessions</h2>
-          <button type="button" className="tk-btn tk-btn--sm" onClick={loadSessions} disabled={busy || !date}>
+          <button type="button" className="tk-btn tk-btn--sm" onClick={loadSessions} disabled={busy || !date || !selectedCenterId}>
             {busy ? <span className="tk-spinner" style={{ width: 13, height: 13 }} /> : <Users size={14} />}
             Load sessions
           </button>
         </div>
         {busy ? (
           <div className="tk-loading"><span className="tk-spinner" /> Loading sessions…</div>
-        ) : sessions.length === 0 ? (
-          <div className="tk-empty">No sessions loaded yet. Pick a date above and press “Load sessions”.</div>
+        ) : !selectedCenterId ? (
+          <div className="tk-empty">Select a test centre first. Sessions from other centres remain hidden.</div>
+        ) : selectedSessions.length === 0 ? (
+          <div className="tk-empty">No sessions loaded for {selectedCenter?.name || "the selected centre"}. Press “Load sessions” to refresh this centre only.</div>
         ) : (
           <div>
-            {sessions.slice(0, 40).map((s, i) => {
-              const sid = String(s?.id ?? s?.session_id ?? s?.sessionId ?? i);
-              const start = s?.start_date || s?.start_date_in_browser_time_zone || s?.exam_date || s?.date || "";
+            {selectedSessions.slice(0, 40).map((s, i) => {
+              const sid = getSessionId(s) || String(i);
+              const start = getSessionTime(s) || s?.exam_date || s?.date || "";
               const seats = s?.available_seats ?? s?.seats ?? s?.capacity ?? "";
-              const center = s?.test_center?.name || s?.center || s?.center_name || "";
+              const center = getSessionCenterName(s) || selectedCenter?.name || "";
               const st = s?.status || "open";
               return (
                 <div key={sid} className="tk-row">
