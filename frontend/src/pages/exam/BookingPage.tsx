@@ -220,6 +220,10 @@ export default function BookingPage() {
     () => dateScopedCenters?.find((item) => String(item.siteId) === String(selectedCenterId)) || null,
     [dateScopedCenters, selectedCenterId]
   );
+  const selectedPortalSlot = useMemo(
+    () => selectedPortalCenter?.availabilitySlots?.find((slot) => String(slot.examSessionId || "").trim() === String(sessionId || "").trim()) || null,
+    [selectedPortalCenter, sessionId]
+  );
   const portalSlotBySessionId = useMemo(() => {
     const map = new Map<string, PortalAvailabilitySlot>();
     dateScopedCenters?.forEach((center) => {
@@ -1702,6 +1706,9 @@ export default function BookingPage() {
   function handleCenterChange(nextCenterId: string) {
     setSelectedCenterId(nextCenterId);
     setSessionId("");
+    setSessionDetail(null);
+    setSessionCenterConflict(null);
+    setLiveAvailableSeats(null);
     setSiteId(nextCenterId);
     setSiteCity(selectedCity);
     setHoldId("");
@@ -1713,11 +1720,14 @@ export default function BookingPage() {
 
   function handleSessionChange(nextSessionId: string) {
     setSessionId(nextSessionId);
+    setSessionDetail(null);
+    setSessionCenterConflict(null);
+    setLiveAvailableSeats(null);
     setHoldId("");
     setHoldExpiresAt("");
     setReservationId("");
     setPaymentSession(null);
-    if (nextSessionId) setStatus("Exam session selected. Create a live temporary hold before booking.");
+    if (nextSessionId) setStatus("One session selected. Create hold is ready after centre verification.");
   }
 
   const isReschedule = searchParams.get("reschedule") === "1";
@@ -1934,25 +1944,57 @@ export default function BookingPage() {
               ) : null}
             </div>
 
-            <div className="bk-field">
+            <div className="bk-field bk-field--wide">
               <span className="bk-field-label">Available sessions at the selected centre <b>*</b></span>
-              <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length} aria-label="Available sessions at the selected centre">
-                <option value="">{selectedCenterId && loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
-                {filteredSessions.map((item, index) => {
-                  const sid = getSessionSiteId(item);
-                  const realName = getResolvedSessionCenterName(item);
-                  const opaqueId = getSessionId(item);
-                  const portalSlot = portalSlotBySessionId.get(opaqueId);
-                  const seats = portalSlot?.seats ?? item?.available_seats ?? item?.seats_available ?? item?.remaining_seats ?? null;
-                  const dateTimeLabel = portalSlot?.time || formatSessionDateTime(item);
-                  const shiftLabel = getSessionShiftLabel(item, index);
-                  return (
-                    <option key={opaqueId} value={opaqueId}>
-                      {shiftLabel} — {realName} (Site #{sid}){dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""} | Session ID: {opaqueId}
-                    </option>
-                  );
-                })}
-              </select>
+              {selectedPortalCenter?.availabilitySlots?.length ? (
+                <div className="bk-session-cards" role="list" aria-label="Available sessions at the selected centre">
+                  {selectedPortalCenter.availabilitySlots.map((slot, index) => {
+                    const opaqueId = String(slot.examSessionId || "").trim();
+                    const isSelected = Boolean(opaqueId && opaqueId === String(sessionId || "").trim());
+                    const isSvpVerified = Boolean(opaqueId && filteredSessions.some((item) => String(getSessionId(item)).trim() === opaqueId));
+                    const seats = slot.seats == null ? "Seats pending" : `${slot.seats} seats`;
+                    return (
+                      <button
+                        key={`${opaqueId || "slot"}-${index}`}
+                        type="button"
+                        className={`bk-session-card${isSelected ? " bk-session-card--selected" : ""}${!opaqueId ? " bk-session-card--disabled" : ""}`}
+                        onClick={() => opaqueId && handleSessionChange(opaqueId)}
+                        disabled={!opaqueId}
+                        role="listitem"
+                        aria-pressed={isSelected}
+                      >
+                        <span className="bk-session-card__copy">
+                          <strong>{slot.time || "Time pending"}</strong>
+                          <span>{formatDateLabel(availableDate)} · {selectedPortalCenter.name} · Site #{selectedCenterId} · {seats}</span>
+                          <code>Session ID: {opaqueId || "SVP session ID pending"}</code>
+                        </span>
+                        <span className="bk-session-card__state">{isSelected ? "Selected" : isSvpVerified ? "Available" : "Select"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length} aria-label="Available sessions at the selected centre">
+                  <option value="">{selectedCenterId && loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
+                  {filteredSessions.map((item, index) => {
+                    const sid = getSessionSiteId(item);
+                    const realName = getResolvedSessionCenterName(item);
+                    const opaqueId = getSessionId(item);
+                    const portalSlot = portalSlotBySessionId.get(opaqueId);
+                    const seats = portalSlot?.seats ?? item?.available_seats ?? item?.seats_available ?? item?.remaining_seats ?? null;
+                    const dateTimeLabel = portalSlot?.time || formatSessionDateTime(item);
+                    const shiftLabel = getSessionShiftLabel(item, index);
+                    return (
+                      <option key={opaqueId} value={opaqueId}>
+                        {shiftLabel} — {realName} (Site #{sid}){dateTimeLabel ? ` | ${dateTimeLabel}` : ""}{seats !== null && seats !== undefined ? ` | Seats: ${seats}` : ""} | Session ID: {opaqueId}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
+              {sessionId && selectedPortalSlot ? (
+                <small className="bk-date-help">Selected one session: {selectedPortalCenter?.name} · {selectedPortalSlot.time || "Time pending"} · {selectedPortalSlot.seats == null ? "Seats pending" : `${selectedPortalSlot.seats} seats`} · Session ID {selectedPortalSlot.examSessionId}</small>
+              ) : null}
               {sessionCenterConflict ? (
                 <small className="bk-error-text">
                   Booking blocked: SVP returned {sessionCenterConflict.actualName} (site {sessionCenterConflict.actualId}) for this session, but the selected centre is site {sessionCenterConflict.expectedId}. Re-select a session; no other centre will be substituted.
@@ -1985,8 +2027,10 @@ export default function BookingPage() {
             <div className="bk-meta-row"><span>Booking type</span><strong className="bk-highlight">{loadingBalance ? "Checking…" : bookingMode.label}</strong></div>
             <div className="bk-meta-row"><span>Reservation credits</span><strong>{loadingBalance ? "-" : bookingMode.reservationCredits}</strong></div>
             <div className="bk-meta-row"><span>Free certificates</span><strong>{loadingBalance ? "-" : bookingMode.freeCertificates}</strong></div>
-            <div className="bk-meta-row"><span>Available seats</span><strong>{loadingSeats ? "Loading…" : (liveAvailableSeats !== null ? liveAvailableSeats : (selectedSession ? (selectedSession.available_seats ?? selectedSession.seats_available ?? "-") : "-"))}</strong></div>
-            <div className="bk-meta-row"><span>Portal centre seats</span><strong>{selectedPortalCenter?.availabilitySlots?.length ? selectedPortalCenter.availabilitySlots.map((slot) => `${slot.time || "slot"}: ${slot.seats == null ? "—" : slot.seats}`).join(" · ") : "-"}</strong></div>
+            <div className="bk-meta-row"><span>Available seats</span><strong>{loadingSeats ? "Loading…" : (liveAvailableSeats !== null ? liveAvailableSeats : (selectedPortalSlot?.seats ?? (selectedSession ? (selectedSession.available_seats ?? selectedSession.seats_available ?? "-") : "-")))}</strong></div>
+            <div className="bk-meta-row"><span>Selected session ID</span><strong>{sessionId || "-"}</strong></div>
+            <div className="bk-meta-row"><span>Selected session time</span><strong>{selectedPortalSlot?.time || (selectedSession ? formatSessionDateTime(selectedSession) : "-")}</strong></div>
+            <div className="bk-meta-row"><span>Portal centre seats</span><strong>{selectedPortalSlot ? `${selectedPortalSlot.time || "slot"}: ${selectedPortalSlot.seats == null ? "—" : selectedPortalSlot.seats}` : (selectedPortalCenter?.availabilitySlots?.length ? selectedPortalCenter.availabilitySlots.map((slot) => `${slot.time || "slot"}: ${slot.seats == null ? "—" : slot.seats}`).join(" · ") : "-")}</strong></div>
             <div className="bk-meta-row"><span>City</span><strong>{siteCity || selectedCity || "-"}</strong></div>
             <div className="bk-meta-row"><span>Site ID</span><strong>{siteId || "-"}</strong></div>
             <div className="bk-meta-row"><span>Selected centre ID</span><strong>{selectedCenterId || siteId || "-"}</strong></div>
