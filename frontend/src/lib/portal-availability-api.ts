@@ -1,4 +1,10 @@
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/+$/, '') || '';
 const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/+$/, '') || '';
+const GATEWAY_BASE = SUPABASE_URL
+  ? `${SUPABASE_URL}/functions/v1/portal-availability-proxy`
+  : BACKEND_URL
+    ? `${BACKEND_URL}/api/portal-availability`
+    : '';
 
 export interface PortalAvailabilityEnvelope<T = unknown> {
   success: boolean;
@@ -7,23 +13,29 @@ export interface PortalAvailabilityEnvelope<T = unknown> {
   error?: string;
 }
 
-function getAccessToken(): string | null {
+function getCandidateToken(): string | null {
   return localStorage.getItem('accessToken');
 }
 
+function getAccessPortalToken(): string | null {
+  return localStorage.getItem('access_token');
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (!BACKEND_URL) {
-    throw new Error('VITE_BACKEND_URL is required for Portal Availability Gateway requests.');
+  if (!GATEWAY_BASE) {
+    throw new Error('VITE_SUPABASE_URL or VITE_BACKEND_URL is required for Portal Availability Gateway requests.');
   }
 
-  const token = getAccessToken();
+  const candidateToken = getCandidateToken();
+  const accessPortalToken = getAccessPortalToken();
   const hasBody = options.body !== undefined;
-  const response = await fetch(`${BACKEND_URL}/api/portal-availability${path}`, {
+  const response = await fetch(`${GATEWAY_BASE}${path}`, {
     ...options,
     headers: {
       Accept: 'application/json',
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(candidateToken ? { Authorization: `Bearer ${candidateToken}` } : {}),
+      ...(accessPortalToken ? { 'X-Access-Token': accessPortalToken } : {}),
       ...(options.headers || {}),
     },
   });

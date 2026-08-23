@@ -2,30 +2,32 @@
 
 ## Scope
 
-Amar now contains a server-side consumer implementation for the documented Portal Availability Gateway. This integration is intentionally limited to read-only availability discovery. It does not replace the centre-locked SVP booking proxy and it does not expose a booking, hold, reservation, payment, OTP, or account-edit route.
+Amar now contains server-side consumer implementations for the documented Portal Availability Gateway in both the existing Express backend and a Supabase Edge Function. The Supabase function is the preferred production path for the Amar frontend. This integration is intentionally limited to read-only availability discovery. It does not replace the centre-locked SVP booking proxy and it does not expose a booking, hold, reservation, payment, OTP, or account-edit route.
 
 The source contract is `PortalAvailabilityGateway—ConsumerSamples.md`. Its gateway base URL is `https://takamol.choice-pc-sv.xyz`. The consumer backend sends only `X-Portal-API-Key`; portal cookies, portal `account_id`, and Amar `credential_id` are not forwarded.
 
 ## Repository implementation
 
-The repo-native backend is Express under `frontend/backend`; no Laravel or PHP application exists in this repository. The equivalent server routes are:
+The repo-native backend is Express under `frontend/backend`; no Laravel or PHP application exists in this repository. The equivalent server routes are available through Express for local/Railway fallback and through the deployed Supabase function for production:
 
-| Amar backend route | Upstream method | Upstream path | Purpose |
+| Amar route | Upstream method | Upstream path | Purpose |
 |---|---:|---|---|
-| `GET /api/portal-availability/occupations` | GET | `/api/external/portal-availability/v1/occupations` | Occupation and language metadata |
-| `POST /api/portal-availability/search_dates` | POST | `/api/external/portal-availability/v1/search_dates` | Available dates and districts |
-| `POST /api/portal-availability/centers` | POST | `/api/external/portal-availability/v1/centers` | Date/city centre availability |
+| `/api/portal-availability/occupations` or Supabase `/functions/v1/portal-availability-proxy/occupations` | GET | `/api/external/portal-availability/v1/occupations` | Occupation and language metadata |
+| `/api/portal-availability/search_dates` or Supabase `/functions/v1/portal-availability-proxy/search_dates` | POST | `/api/external/portal-availability/v1/search_dates` | Available dates and districts |
+| `/api/portal-availability/centers` or Supabase `/functions/v1/portal-availability-proxy/centers` | POST | `/api/external/portal-availability/v1/centers` | Date/city centre availability |
 
 The caller must authenticate to Amar with its normal access JWT. The server reads `PORTAL_AVAILABILITY_API_KEY` from its environment and never accepts an API key from request headers or bodies. The upstream gateway receives only the server key and the whitelisted request body.
 
 ## Environment configuration
 
-Set these variables on the backend host, not in Vite or browser environment variables:
+Set these variables as server-side secrets in either the Express/Railway backend or the Supabase project’s Edge Function secrets. Do not place them in Vite or browser environment variables:
 
 ```bash
 PORTAL_AVAILABILITY_GATEWAY_URL=https://takamol.choice-pc-sv.xyz
 PORTAL_AVAILABILITY_API_KEY=pav_live_REPLACE_WITH_KEY
 ```
+
+For Supabase: Dashboard → Project `xklwzkraobxetxdcysun` → Edge Functions → Secrets. The key must be added as `PORTAL_AVAILABILITY_API_KEY`; the URL has a safe code default but may also be set as `PORTAL_AVAILABILITY_GATEWAY_URL`.
 
 The key is deliberately not added to Git, `.env` files, frontend bundles, URLs, or logs. If it is exposed, revoke and replace it.
 
@@ -62,7 +64,7 @@ The active Amar SVP booking page continues to use the separate centre-scoped SVP
 
 ## Frontend client
 
-`frontend/src/lib/portal-availability-api.ts` provides browser-safe wrappers for the three Amar backend routes. It sends the Amar access JWT only to the Amar backend. It does not know or accept `PORTAL_AVAILABILITY_API_KEY`.
+`frontend/src/lib/portal-availability-api.ts` provides browser-safe wrappers for the three Amar routes. When `VITE_SUPABASE_URL` is present, it calls the deployed Supabase function; otherwise it falls back to `VITE_BACKEND_URL`. It sends Amar access credentials only to the server-side route and does not know or accept `PORTAL_AVAILABILITY_API_KEY`.
 
 The wrappers are:
 
@@ -85,4 +87,4 @@ The backend preserves the upstream status and message in the normal Express erro
 
 ## Verification performed
 
-Backend contract tests cover default gateway configuration, whitelist payload normalization, Prometric language-code enforcement, server-only API-key forwarding, successful `{ success: true, data }` envelopes, and upstream error propagation. No live gateway key is stored in this repository, and no booking operation is part of this integration.
+Backend contract tests cover default gateway configuration, whitelist payload normalization, Prometric language-code enforcement, server-only API-key forwarding, successful `{ success: true, data }` envelopes, and upstream error propagation. The Supabase function `portal-availability-proxy` was deployed to project `xklwzkraobxetxdcysun` as version 1. An unauthenticated smoke request returned the expected HTTP 401, confirming the function boundary is reachable; a real gateway availability call remains pending until `PORTAL_AVAILABILITY_API_KEY` is added to Supabase secrets. No live gateway key is stored in this repository, and no booking operation is part of this integration.
