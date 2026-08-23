@@ -10,7 +10,7 @@ import {
 
 test('uses the documented gateway default and never reads a frontend key', () => {
   assert.deepEqual(getPortalAvailabilityConfig({}), {
-    baseUrl: 'https://takamol.choice-pc-sv.xyz',
+    baseUrl: 'https://takamol-production.up.railway.app',
     apiKey: '',
   });
 });

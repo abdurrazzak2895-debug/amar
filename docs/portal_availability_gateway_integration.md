@@ -4,7 +4,7 @@
 
 Amar now contains server-side consumer implementations for the documented Portal Availability Gateway in both the existing Express backend and a Supabase Edge Function. The Supabase function is the preferred production path for the Amar frontend. This integration is intentionally limited to read-only availability discovery. It does not replace the centre-locked SVP booking proxy and it does not expose a booking, hold, reservation, payment, OTP, or account-edit route.
 
-The source contract is `PortalAvailabilityGateway—ConsumerSamples.md`. Its gateway base URL is `https://takamol.choice-pc-sv.xyz`. The consumer backend sends only `X-Portal-API-Key`; portal cookies, portal `account_id`, and Amar `credential_id` are not forwarded.
+The source contract is `PortalAvailabilityGateway—ConsumerSamples.md`. Amar’s configured gateway base URL is `https://takamol-production.up.railway.app`. The consumer backend sends only `X-Portal-API-Key`; portal cookies, portal `account_id`, and Amar `credential_id` are not forwarded.
 
 ## Repository implementation
 
@@ -23,11 +23,11 @@ The caller must authenticate to Amar with its normal access JWT. The server read
 Set these variables as server-side secrets in either the Express/Railway backend or the Supabase project’s Edge Function secrets. Do not place them in Vite or browser environment variables:
 
 ```bash
-PORTAL_AVAILABILITY_GATEWAY_URL=https://takamol.choice-pc-sv.xyz
+PORTAL_AVAILABILITY_GATEWAY_URL=https://takamol-production.up.railway.app
 PORTAL_AVAILABILITY_API_KEY=pav_live_REPLACE_WITH_KEY
 ```
 
-For Supabase: Dashboard → Project `xklwzkraobxetxdcysun` → Edge Functions → Secrets. The key must be added as `PORTAL_AVAILABILITY_API_KEY`; the URL has a safe code default but may also be set as `PORTAL_AVAILABILITY_GATEWAY_URL`.
+For Supabase: Dashboard → Project `xklwzkraobxetxdcysun` → Edge Functions → Secrets. The key must be added as `PORTAL_AVAILABILITY_API_KEY`, and `PORTAL_AVAILABILITY_GATEWAY_URL` should be set to `https://takamol-production.up.railway.app` if an explicit URL secret is present. The Supabase function URL itself remains `https://xklwzkraobxetxdcysun.supabase.co/functions/v1/portal-availability-proxy`.
 
 The key is deliberately not added to Git, `.env` files, frontend bundles, URLs, or logs. If it is exposed, revoke and replace it.
 

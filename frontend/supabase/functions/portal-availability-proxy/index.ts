@@ -8,7 +8,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-const GATEWAY_URL = (Deno.env.get("PORTAL_AVAILABILITY_GATEWAY_URL") || "https://takamol.choice-pc-sv.xyz").replace(/\/+$/, "");
+const GATEWAY_URL = (Deno.env.get("PORTAL_AVAILABILITY_GATEWAY_URL") || "https://takamol-production.up.railway.app").replace(/\/+$/, "");
 const GATEWAY_KEY = (Deno.env.get("PORTAL_AVAILABILITY_API_KEY") || "").trim();
 const ACCESS_JWT_SECRET = Deno.env.get("JWT_ACCESS_SECRET") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";

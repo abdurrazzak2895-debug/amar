@@ -1,4 +1,4 @@
-const DEFAULT_GATEWAY_URL = 'https://takamol.choice-pc-sv.xyz';
+const DEFAULT_GATEWAY_URL = 'https://takamol-production.up.railway.app';
 
 export function getPortalAvailabilityConfig(env = process.env) {
   const baseUrl = String(env.PORTAL_AVAILABILITY_GATEWAY_URL || DEFAULT_GATEWAY_URL).trim().replace(/\/+$/, '');
