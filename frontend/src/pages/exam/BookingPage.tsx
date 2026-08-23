@@ -899,7 +899,11 @@ export default function BookingPage() {
     let active = true;
     const retryNotice = sessionRetryNotice;
     (async () => {
-      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
+      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) {
+        setSessions([]);
+        setLoadingSessions(false);
+        return;
+      }
       setLoadingSessions(true);
       if (!retryNotice) setError("");
       try {
@@ -1793,7 +1797,7 @@ export default function BookingPage() {
             <div className="bk-field">
               <span className="bk-field-label">Live SVP test centre <b>*</b></span>
               <select value={selectedCenterId} onChange={(e) => handleCenterChange(e.target.value)} disabled={!centerOptions.length || loadingCenterAvailability}>
-                <option value="">{loadingCenterAvailability ? "Checking centres for this date…" : loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
+                <option value="">{loadingCenterAvailability ? "Checking centres for this date…" : (selectedCenterId && loadingSessions) ? "Loading selected-centre sessions…" : "Select live SVP test center"}</option>
                 {centerOptions.map((item) => {
                   const availability = dateScopedCenters?.find((center) => String(center.siteId) === String(item.siteId));
                   return <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}{availability ? getPortalSlotLabel(availability) : ""}</option>;
@@ -1815,7 +1819,7 @@ export default function BookingPage() {
             <div className="bk-field">
               <span className="bk-field-label">Available sessions at the selected centre <b>*</b></span>
               <select value={sessionId} onChange={(e) => handleSessionChange(e.target.value)} disabled={!filteredSessions.length} aria-label="Available sessions at the selected centre">
-                <option value="">{loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
+                <option value="">{selectedCenterId && loadingSessions ? "Loading selected-centre sessions…" : "Select a session at this centre"}</option>
                 {filteredSessions.map((item, index) => {
                   const sid = getSessionSiteId(item);
                   const realName = getResolvedSessionCenterName(item);
