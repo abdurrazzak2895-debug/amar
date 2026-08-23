@@ -125,3 +125,16 @@ Proxy examples:
 - GET /api/svp/exam-sessions?category_id=56&city=Mymensingh&exam_date=2025-12-24
 - POST /api/svp/temporary-seats   (body passes through)
 - POST /api/svp/exam-reservations (body passes through)
+
+## Portal Availability Gateway
+
+The backend exposes the documented read-only availability contract at `/api/portal-availability`. It requires the normal Amar access token from the caller, then calls `https://takamol.choice-pc-sv.xyz` with the server-only `X-Portal-API-Key` header. The portal key is never accepted from the browser and is never forwarded from query strings, cookies, `account_id`, or `credential_id`.
+
+Configure these server environment variables on the backend host:
+
+```bash
+PORTAL_AVAILABILITY_GATEWAY_URL=https://takamol.choice-pc-sv.xyz
+PORTAL_AVAILABILITY_API_KEY=pav_live_REPLACE_WITH_KEY
+```
+
+Available routes are `GET /api/portal-availability/occupations`, `POST /api/portal-availability/search_dates`, and `POST /api/portal-availability/centers`. The centers payload requires the Prometric language code such as `LOABB`; ISO values such as `en` are rejected. This gateway is read-only availability and has no booking, hold, reservation, payment, OTP, or account-edit route. Centre selection remains a local consumer value and must not be treated as an SVP booking binding.
