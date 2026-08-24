@@ -149,27 +149,50 @@ export function getSessionId(item: any): string {
  */
 export function getSessionBinding(item: any): any {
   const nested = item?.exam_session || item?.data?.exam_session || {};
-  return item?.session_binding || item?.center_binding || item?.booking_binding ||
-    nested?.session_binding || nested?.center_binding || nested?.booking_binding || {};
+  return item?.session_binding || item?.center_binding || item?.booking_binding || item?.binding ||
+    nested?.session_binding || nested?.center_binding || nested?.booking_binding || nested?.binding || {};
 }
 
 export function getSessionSiteId(item: any): string {
   const nested = item?.exam_session || item?.data?.exam_session || {};
   const center = item?.test_center || nested?.test_center || {};
+  const site = item?.site || nested?.site || {};
   const binding = getSessionBinding(item);
   return String(
     item?.site_id ||
-    nested?.site_id ||
-    center?.site_id ||
-    center?.id ||
-    center?.test_center_id ||
+    item?.session_site_id ||
     item?.test_center_id ||
+    item?.response_center_id ||
+    item?.responseCenterId ||
+    item?.center_id ||
+    item?.centerId ||
+    nested?.site_id ||
+    nested?.session_site_id ||
     nested?.test_center_id ||
-    item?.site?.id ||
-    nested?.site?.id ||
+    nested?.response_center_id ||
+    nested?.responseCenterId ||
+    nested?.center_id ||
+    nested?.centerId ||
+    center?.site_id ||
+    center?.siteId ||
+    center?.test_center_id ||
+    center?.center_id ||
+    center?.centerId ||
+    center?.id ||
+    site?.site_id ||
+    site?.siteId ||
+    site?.test_center_id ||
+    site?.center_id ||
+    site?.id ||
     binding?.test_center_id ||
+    binding?.response_center_id ||
+    binding?.responseCenterId ||
+    binding?.center_id ||
+    binding?.centerId ||
     binding?.site_id ||
+    binding?.siteId ||
     binding?.test_center?.test_center_id ||
+    binding?.test_center?.site_id ||
     binding?.test_center?.id ||
     ""
   );

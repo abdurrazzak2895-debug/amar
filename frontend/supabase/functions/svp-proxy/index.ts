@@ -532,10 +532,31 @@ function normalizeCityName(value: unknown): string {
 
 function extractSessionCenterIds(value: any): string[] {
   const candidates = [value, value?.exam_session, value?.data, value?.data?.exam_session].filter(Boolean);
-  return Array.from(new Set(candidates.map((session: any) => String(
-    session?.test_center_id ?? session?.test_center?.test_center_id ?? session?.test_center?.id ??
-    session?.site_id ?? session?.site?.id ?? ""
-  ).trim()).filter(Boolean)));
+  return Array.from(new Set(candidates.map((session: any) => {
+    const center = session?.test_center || {};
+    const site = session?.site || {};
+    return String(
+      session?.test_center_id ??
+      session?.response_center_id ??
+      session?.responseCenterId ??
+      session?.center_id ??
+      session?.centerId ??
+      center?.test_center_id ??
+      center?.response_center_id ??
+      center?.responseCenterId ??
+      center?.center_id ??
+      center?.centerId ??
+      center?.site_id ??
+      center?.siteId ??
+      center?.id ??
+      session?.site_id ??
+      session?.session_site_id ??
+      site?.test_center_id ??
+      site?.site_id ??
+      site?.id ??
+      ""
+    ).trim();
+  }).filter(Boolean)));
 }
 
 async function assertSvpSessionMatchesCenter(token: string, sessionId: string | number, expectedCenterId: string | number) {

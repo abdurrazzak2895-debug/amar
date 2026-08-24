@@ -1968,9 +1968,9 @@ export default function BookingPage() {
                       <button
                         key={`${opaqueId || "slot"}-${index}`}
                         type="button"
-                        className={`bk-session-card${isSelected ? " bk-session-card--selected" : ""}${!opaqueId ? " bk-session-card--disabled" : ""}`}
-                        onClick={() => opaqueId && handleSessionChange(opaqueId)}
-                        disabled={!opaqueId}
+                        className={`bk-session-card${isSelected ? " bk-session-card--selected" : ""}${!opaqueId || !isSvpVerified ? " bk-session-card--disabled" : ""}`}
+                        onClick={() => opaqueId && isSvpVerified && handleSessionChange(opaqueId)}
+                        disabled={!opaqueId || !isSvpVerified}
                         role="listitem"
                         aria-pressed={isSelected}
                       >
@@ -1979,7 +1979,7 @@ export default function BookingPage() {
                           <span>{formatDateLabel(availableDate)} · {selectedPortalCenter.name} · Site #{selectedCenterId} · {seats}</span>
                           <code>Session ID: {opaqueId || "SVP session ID pending"}</code>
                         </span>
-                        <span className="bk-session-card__state">{isSelected ? "Selected" : isSvpVerified ? "Available" : "Select"}</span>
+                        <span className="bk-session-card__state">{isSelected ? "Selected" : isSvpVerified ? "Available" : "Waiting for SVP verification"}</span>
                       </button>
                     );
                   })}

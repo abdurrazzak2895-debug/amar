@@ -1,10 +1,25 @@
 export function getSessionCenterId(session: any): string {
+  const center = session?.test_center || {};
+  const site = session?.site || {};
   return String(
     session?.test_center_id ??
-    session?.test_center?.test_center_id ??
-    session?.test_center?.id ??
+    session?.response_center_id ??
+    session?.responseCenterId ??
+    session?.center_id ??
+    session?.centerId ??
+    center?.test_center_id ??
+    center?.response_center_id ??
+    center?.responseCenterId ??
+    center?.center_id ??
+    center?.centerId ??
+    center?.site_id ??
+    center?.siteId ??
+    center?.id ??
     session?.site_id ??
-    session?.site?.id ??
+    session?.session_site_id ??
+    site?.test_center_id ??
+    site?.site_id ??
+    site?.id ??
     ""
   ).trim();
 }
