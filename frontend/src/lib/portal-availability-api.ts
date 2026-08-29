@@ -1,5 +1,8 @@
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/+$/, '') || '';
 const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim().replace(/\/+$/, '') || '';
+// Portal Availability Gateway is intentionally disabled. Keep the endpoint
+// configuration below for rollback, but do not issue availability requests.
+const PORTAL_AVAILABILITY_DISABLED = true;
 const GATEWAY_BASE = SUPABASE_URL
   ? `${SUPABASE_URL}/functions/v1/portal-availability-proxy`
   : BACKEND_URL
@@ -22,6 +25,9 @@ function getAccessPortalToken(): string | null {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (PORTAL_AVAILABILITY_DISABLED) {
+    throw Object.assign(new Error('Portal Availability Gateway is disabled.'), { status: 410 });
+  }
   if (!GATEWAY_BASE) {
     throw new Error('VITE_SUPABASE_URL or VITE_BACKEND_URL is required for Portal Availability Gateway requests.');
   }
