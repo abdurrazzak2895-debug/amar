@@ -971,7 +971,30 @@ export default function BookingPage() {
           throw new Error(`SVP returned site ${responseCenterId} for the selected site ${expectedCenterId}; sessions were blocked.`);
         }
         const responseCenterName = getResponseCenterName(data) || selectedCenterOption?.name || `site ${expectedCenterId}`;
-        const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
+        let liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
+
+        // t2hub is a read-only discovery fallback only. It may provide opaque
+        // session rows when the official SVP list is temporarily empty, but the
+        // rows are still filtered to the selected site and the final detail
+        // verification below remains mandatory before any booking write.
+        if (!liveSessions.length) {
+          try {
+            const t2hubData: any = await api(`/t2hub/pacc-exam-sessions?${new URLSearchParams({
+              category_id: String(categoryId),
+              city: String(selectedCity),
+              exam_date: availableDate,
+            }).toString()}`);
+            const t2hubSessions = Array.isArray(t2hubData?.exam_sessions)
+              ? t2hubData.exam_sessions
+              : Array.isArray(t2hubData?.sessions)
+                ? t2hubData.sessions
+                : pickArray(t2hubData);
+            liveSessions = t2hubSessions.filter((item: any) => String(getSessionSiteId(item) || "").trim() === expectedCenterId);
+          } catch {
+            // Keep the official SVP empty state; t2hub must never substitute a
+            // different centre or turn an unavailable session into a booking.
+          }
+        }
         const boundSessions = liveSessions.map((item: any) => {
           const itemCenterId = String(getSessionSiteId(item) || "").trim();
           if (itemCenterId) return item;
@@ -1026,7 +1049,7 @@ export default function BookingPage() {
         setSessions(scopedSessions);
         setSessionRetryNotice(sessionMatchNotice);
         setStatus(scopedSessions.length
-          ? `${scopedSessions.length} SVP session${scopedSessions.length === 1 ? "" : "s"} loaded for ${responseCenterName} (site ${expectedCenterId}).`
+          ? `${scopedSessions.length} centre-scoped session${scopedSessions.length === 1 ? "" : "s"} loaded for ${responseCenterName} (site ${expectedCenterId}).`
           : portalSlots.length
             ? `Portal reported ${portalSlots.length} slot${portalSlots.length === 1 ? "" : "s"}, but SVP did not return the same centre sessions. No other centre will be substituted.`
             : `No SVP exam sessions are available at ${responseCenterName} on ${availableDate}. No other centre will be substituted.`);
