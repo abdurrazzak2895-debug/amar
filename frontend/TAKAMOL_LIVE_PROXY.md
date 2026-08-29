@@ -10,8 +10,12 @@ Set these secrets for the Supabase project. The encryption key is the base64 val
 supabase secrets set \
   TAKAMOL_LIVE_API_URL=https://t2hub.app/takamol/api \
   TAKAMOL_ENCRYPTION_KEY_B64=REPLACE_WITH_THE_LIVE_BASE64_KEY \
+  TAKAMOL_SESSION_COOKIE=REPLACE_WITH_SERVER_SIDE_TAKAMOL_SESSION_COOKIE \
+  TAKAMOL_XSRF_TOKEN=REPLACE_WITH_SERVER_SIDE_XSRF_TOKEN \
   --project-ref xklwzkraobxetxdcysun
 ```
+
+`TAKAMOL_SESSION_COOKIE` and `TAKAMOL_XSRF_TOKEN` are optional server-side fallbacks. Configure them only when the proxy must use a maintained authenticated t2hub session; never expose them as `VITE_` variables. The session cookie may rotate, so this fallback requires a refresh process or, preferably, a same-origin Laravel route.
 
 The proxy maps the application routes as follows:
 
@@ -33,7 +37,13 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
 VITE_SUPABASE_JWKS_URL=https://xklwzkraobxetxdcysun.supabase.co/auth/v1/.well-known/jwks.json
 ```
 
-Leave `VITE_TAKAMOL_API_URL` unset in production. When it is unset, the frontend correctly calls:
+For the repository-contained Supabase proxy path, set this public Vercel variable in Production and Preview:
+
+```text
+VITE_TAKAMOL_API_URL=https://xklwzkraobxetxdcysun.supabase.co/functions/v1/takamol-proxy
+```
+
+When `VITE_TAKAMOL_API_URL` is unset, the frontend also falls back to the same Supabase proxy URL:
 
 ```text
 ${VITE_SUPABASE_URL}/functions/v1/takamol-proxy

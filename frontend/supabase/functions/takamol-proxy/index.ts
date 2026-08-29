@@ -87,9 +87,13 @@ async function fetchLive(path: string, query: URLSearchParams, req: Request): Pr
   const upstreamUrl = `${LIVE_API_BASE}${path}${query.toString() ? `?${query.toString()}` : ""}`;
   const headers = new Headers({ Accept: "application/json" });
   const authorization = req.headers.get("authorization");
-  const cookie = req.headers.get("cookie");
+  const requestCookie = req.headers.get("cookie");
+  const configuredCookie = Deno.env.get("TAKAMOL_SESSION_COOKIE");
+  const cookie = requestCookie || configuredCookie;
+  const xsrfToken = Deno.env.get("TAKAMOL_XSRF_TOKEN");
   if (authorization) headers.set("authorization", authorization);
   if (cookie) headers.set("cookie", cookie);
+  if (xsrfToken && !headers.has("x-xsrf-token")) headers.set("x-xsrf-token", xsrfToken);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60_000);
