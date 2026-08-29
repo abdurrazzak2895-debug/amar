@@ -91,8 +91,9 @@ const App = () => (
 
               {/* Takamol Live Console */}
               <Route path="/takamol" element={<TakamolLayout />}>
-                <Route index element={<Navigate to="/takamol/dashboard" replace />} />
+                <Route index element={<TakamolBookingPage />} />
                 <Route path="login" element={<TakamolLoginPage />} />
+                <Route path="agent/login" element={<TakamolLoginPage />} />
                 <Route path="dashboard" element={<TakamolDashboardPage />} />
                 <Route path="booking" element={<TakamolBookingPage />} />
                 <Route path="reservations" element={<TakamolReservationsPage />} />
