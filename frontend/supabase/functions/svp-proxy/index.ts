@@ -8,16 +8,6 @@ import {
   getReservationLookupId,
   reshapeReservationPayload,
 } from "./reservation-utils.ts";
-import {
-  bootstrapT2HubSession,
-  clearLiveSession,
-  getLastT2HubCookie,
-  loadT2HubSession,
-  persistT2HubSession,
-  setLastT2HubCookie,
-  T2HUB_SESSION_MISSING_CODE,
-  type T2HubSessionLike,
-} from "./t2hub-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,13 +17,18 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
+// Code returned in the outer error response when a t2hub-backed route is
+// called without x-t2hub-cookie + x-t2hub-key. The booking page detects
+// this and triggers a one-time t2hub login bridge to capture the
+// caller's own t2hub session material.
+export const T2HUB_SESSION_MISSING_CODE = "T2HUB_SESSION_MISSING";
+
 function json(data: unknown, status = 200) {
   const headers: Record<string, string> = {
     ...corsHeaders,
     "Content-Type": "application/json",
   };
-  const lastCookie = getLastT2HubCookie();
-  if (lastCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastCookie;
+  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
   return new Response(JSON.stringify(data), { status, headers });
 }
 
@@ -44,7 +39,7 @@ function getSupabase() {
   );
 }
 
-// ── SVP API helper ──────────────────────────────────────────────────
+// ΓöÇΓöÇ SVP API helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const SVP_BASE = Deno.env.get("SVP_BASE_URL") || "https://svp-international-api.pacc.sa";
 const SVP_LOCALE = "en";
 const SVP_ORIGIN = "https://svp-international.pacc.sa";
@@ -165,9 +160,21 @@ function findReservationId(value: any): string {
   return "";
 }
 
-// t2hub session material lives in t2hub-session.ts (DB-backed) and the
-// most-recent-cookie echo state is held there too. The declarations below
-// are intentionally not duplicated in this file.
+let t2hubSession:
+  | {
+      keyRaw: string;
+      cookie: string;
+      csrfToken: string;
+      appPath: string;
+      expiresAt: number;
+    }
+  | null = null;
+
+// After every t2hub call we stash the most recent cookies here so the
+// response builder can echo them back to the caller in
+// `x-t2hub-cookie`. The caller is responsible for keeping its own copy in
+// sync ΓÇö these cookies rotate on every t2hub response.
+let lastT2HubCookie = "";
 
 // The t2hub landing page, every JSON API call, and the encrypted envelope
 // (x-encrypted: 1) all rotate the session and CSRF cookies. We must keep the
@@ -176,7 +183,7 @@ function findReservationId(value: any): string {
 // stale, the API returns 401/419 even with a fresh key, so this state is the
 // most important thing the proxy maintains.
 //
-// t2hub is a stateful Laravel app — a fresh server has no session. Callers
+// t2hub is a stateful Laravel app ΓÇö a fresh server has no session. Callers
 // MUST pass their logged-in t2hub cookies (and the session key from
 // `window.__sk`) via the `x-t2hub-cookie` and `x-t2hub-key` request headers
 // so we can hit the read-only API on their behalf. After each call we return
@@ -285,25 +292,43 @@ function extractT2HubCsrf(html: string): string {
   );
 }
 
-async function getT2HubSession() {
-  // Delegate to the persistent, DB-backed session module. The previous
-  // implementation tried to bootstrap a session by hitting the public
-  // t2hub landing page; that worked only as long as cookies from a prior
-  // caller were still fresh in module state. The new flow reads from
-  // public.t2hub_sessions and surfaces a clear T2HUB_SESSION_MISSING error
-  // when the admin hasn't bootstrapped yet.
-  const cached = getLiveSession();
-  if (cached) return cached;
+async function fetchT2HubSessionPage(appPath: string) {
+  const res = await fetch(`${T2HUB_BASE}${appPath}`, {
+    headers: {
+      Accept: "text/html",
+      "User-Agent": SVP_UA,
+    },
+  });
+  const html = await res.text();
+  return { res, html, keyRaw: extractT2HubKey(html) };
+}
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw {
-      statusCode: 500,
-      message: "Supabase environment is not configured for t2hub session lookup",
+async function getT2HubSession() {
+  if (t2hubSession && t2hubSession.expiresAt > Date.now()) return t2hubSession;
+
+  const appPaths = [T2HUB_APP_PATH, `${T2HUB_APP_PATH}/`, `${T2HUB_APP_PATH}/agent/login`];
+  let lastStatus = 0;
+  for (const appPath of appPaths) {
+    const { res, html, keyRaw } = await fetchT2HubSessionPage(appPath);
+    lastStatus = res.status;
+    if (!res.ok || !keyRaw) continue;
+
+    t2hubSession = {
+      keyRaw,
+      csrfToken: extractT2HubCsrf(html),
+      cookie: extractT2HubCookie(res.headers),
+      appPath,
+      expiresAt: Date.now() + 10 * 60 * 1000,
     };
+    return t2hubSession;
   }
-  return await loadT2HubSession(supabaseUrl, serviceRoleKey);
+
+  throw {
+    statusCode: 503,
+    code: T2HUB_SESSION_MISSING_CODE,
+    message: "t2hub session has not been provided. The booking page requires a one-time t2hub login to capture the caller's session cookies and AES key before it can load t2hub-backed data.",
+    details: { status: lastStatus || undefined },
+  };
 }
 
 // t2hub uses Laravel's Crypt::encrypt with AES-256-GCM. The encrypted envelope
@@ -348,13 +373,13 @@ async function decodeT2HubResponse(res: Response, keyRaw: string) {
     try {
       envelope = JSON.parse(envelope);
     } catch {
-      /* not JSON — keep as raw */
+      /* not JSON ΓÇö keep as raw */
     }
   }
   return await decryptT2HubEnvelope(envelope, keyRaw);
 }
 
-async function fetchT2HubJson(path: string, session: T2HubSessionLike) {
+async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSession>) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
@@ -378,7 +403,7 @@ async function fetchT2HubJson(path: string, session: T2HubSessionLike) {
   }
 }
 
-async function fetchT2HubJsonPost(path: string, body: unknown, session: T2HubSessionLike) {
+async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNullable<typeof t2hubSession>) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
@@ -390,7 +415,7 @@ async function fetchT2HubJsonPost(path: string, body: unknown, session: T2HubSes
         "Content-Type": "application/json",
         Referer: `${T2HUB_BASE}${session.appPath}`,
         "User-Agent": SVP_UA,
-        // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected —
+        // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected ΓÇö
         // POSTing without a matching X-CSRF-TOKEN (bound to the session cookie)
         // fails with 419. The XSRF-TOKEN cookie value is URL-encoded while the
         // header value is the raw meta-tag value, and Laravel compares them
@@ -414,7 +439,7 @@ async function fetchT2HubJsonPost(path: string, body: unknown, session: T2HubSes
 async function t2hubFetch(path: string, req: Request): Promise<any> {
   const provided = t2HubHeadersFromRequest(req);
   if (provided) {
-    const session: T2HubSessionLike = {
+    const session: NonNullable<typeof t2hubSession> = {
       keyRaw: provided.keyRaw,
       cookie: provided.cookie,
       csrfToken: "",
@@ -422,25 +447,22 @@ async function t2hubFetch(path: string, req: Request): Promise<any> {
       expiresAt: Date.now() + 10 * 60 * 1000,
     };
     const data = await fetchT2HubJson(path, session);
-    setLastT2HubCookie(session.cookie);
+    lastT2HubCookie = session.cookie;
     return data;
   }
-  // Fallback: server-side cached session. The session is loaded from
-  // public.t2hub_sessions and cached in module memory for 10 min.
+  // Fallback: server-side cached session. Only works if a previous caller
+  // bootstrapped the proxy by providing their cookies once.
   const session = await getT2HubSession();
   try {
     const data = await fetchT2HubJson(path, session);
-    setLastT2HubCookie(session.cookie);
+    lastT2HubCookie = session.cookie;
     return data;
   } catch (err: any) {
     if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
-      // Crypto failure means the persisted session has stale material. Clear
-      // the in-memory cache so the next call re-reads from the DB and a
-      // subsequent /t2hub/bootstrap can refresh it.
-      clearLiveSession();
+      t2hubSession = null;
       const fresh = await getT2HubSession();
       const data = await fetchT2HubJson(path, fresh);
-      setLastT2HubCookie(fresh.cookie);
+      lastT2HubCookie = fresh.cookie;
       return data;
     }
     throw err;
@@ -450,7 +472,7 @@ async function t2hubFetch(path: string, req: Request): Promise<any> {
 async function t2hubPost(path: string, body: unknown, req: Request): Promise<any> {
   const provided = t2HubHeadersFromRequest(req);
   if (provided) {
-    const session: T2HubSessionLike = {
+    const session: NonNullable<typeof t2hubSession> = {
       keyRaw: provided.keyRaw,
       cookie: provided.cookie,
       csrfToken: "",
@@ -458,20 +480,20 @@ async function t2hubPost(path: string, body: unknown, req: Request): Promise<any
       expiresAt: Date.now() + 10 * 60 * 1000,
     };
     const data = await fetchT2HubJsonPost(path, body, session);
-    setLastT2HubCookie(session.cookie);
+    lastT2HubCookie = session.cookie;
     return data;
   }
   const session = await getT2HubSession();
   try {
     const data = await fetchT2HubJsonPost(path, body, session);
-    setLastT2HubCookie(session.cookie);
+    lastT2HubCookie = session.cookie;
     return data;
   } catch (err: any) {
     if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
-      clearLiveSession();
+      t2hubSession = null;
       const fresh = await getT2HubSession();
       const data = await fetchT2HubJsonPost(path, body, fresh);
-      setLastT2HubCookie(fresh.cookie);
+      lastT2HubCookie = fresh.cookie;
       return data;
     }
     throw err;
@@ -483,7 +505,7 @@ function jsonWithT2HubCookie(data: unknown, status = 200) {
     ...corsHeaders,
     "Content-Type": "application/json",
   };
-  if (getLastT2HubCookie()) headers[T2HUB_RESPONSE_COOKIE_HEADER] = getLastT2HubCookie();
+  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
   return new Response(JSON.stringify(data), { status, headers });
 }
 
@@ -514,7 +536,7 @@ function normalizeT2HubSession(item: any, centerByName: Map<string, any>) {
   };
 }
 
-// ── Crypto ──────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Crypto ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 async function getEncKey(): Promise<Uint8Array> {
   const raw = Deno.env.get("SESSION_ENC_KEY_BASE64") || "";
   if (raw) {
@@ -539,7 +561,7 @@ async function decryptString(b64: string): Promise<string> {
   return new TextDecoder().decode(decrypted);
 }
 
-// ── JWT verify ──────────────────────────────────────────────────────
+// ΓöÇΓöÇ JWT verify ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 async function verifyJwt(token: string): Promise<Record<string, unknown>> {
   const secret = Deno.env.get("JWT_ACCESS_SECRET")!;
   const parts = token.split(".");
@@ -567,7 +589,7 @@ async function verifyJwt(token: string): Promise<Record<string, unknown>> {
   return claims;
 }
 
-// ── Auth middleware ─────────────────────────────────────────────────
+// ΓöÇΓöÇ Auth middleware ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 async function requireAuth(req: Request): Promise<{ user: Record<string, unknown>; svpToken: string }> {
   const hdr = req.headers.get("authorization") || "";
   const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : null;
@@ -605,7 +627,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-// ── Route definitions ───────────────────────────────────────────────
+// ΓöÇΓöÇ Route definitions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 interface RouteEntry {
   method: string;
   pattern: RegExp;
@@ -764,7 +786,7 @@ async function fetchOfficialCenterSessions(
   return extractSessions(payload).filter((session: any) => rawSessionMatchesCenter(session, testCenterId));
 }
 
-// ── Main handler ────────────────────────────────────────────────────
+// ΓöÇΓöÇ Main handler ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -774,98 +796,10 @@ Deno.serve(async (req) => {
   const path = url.pathname.replace(/^\/svp-proxy/, "");
   const query = url.search.replace(/^\?/, "");
 
-  // ── Admin: t2hub session bootstrap (no SVP auth required) ─────
-  // The svp-proxy relies on a shared t2hub.app session for read-only
-  // booking data (occupations, available dates, test centers, exam sessions
-  // bulk). When the proxy cold-starts without that session, the first
-  // /occupations or /available-dates call would 503 with
-  // T2HUB_SESSION_MISSING. An admin hits this endpoint once to fetch
-  // t2hub's landing page server-side and persist the cookies + AES key
-  // to public.t2hub_sessions. Subsequent calls reuse the cached row.
-  //
-  // Authentication: pass `Authorization: Bearer <T2HUB_BOOTSTRAP_TOKEN>`
-  // matching the T2HUB_BOOTSTRAP_TOKEN env var. When the env var is unset
-  // (local dev) the endpoint refuses all callers.
-  if (req.method === "POST" && path === "/t2hub/bootstrap") {
-    const expected = (Deno.env.get("T2HUB_BOOTSTRAP_TOKEN") || "").trim();
-    if (!expected) {
-      return json({ error: "T2HUB_BOOTSTRAP_TOKEN is not configured" }, 503);
-    }
-    const auth = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-    if (auth !== expected) {
-      return json({ error: "Invalid bootstrap token" }, 401);
-    }
-    try {
-      const result = await bootstrapT2HubSession();
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-      if (!supabaseUrl || !serviceRoleKey) {
-        return json({ error: "Supabase env not configured" }, 500);
-      }
-      await persistT2HubSession(supabaseUrl, serviceRoleKey, {
-        cookie: result.cookie,
-        keyRaw: result.keyRaw,
-        csrfToken: result.csrfToken,
-        appPath: result.appPath,
-        bootstrappedAt: result.bootstrappedAt,
-        lastUsedAt: result.bootstrappedAt,
-      });
-      return json({
-        ok: true,
-        appPath: result.appPath,
-        bootstrappedAt: result.bootstrappedAt,
-        cookieLength: result.cookie.length,
-        keyLength: result.keyRaw.length,
-      });
-    } catch (err: any) {
-      return json(
-        { error: err?.message || "bootstrap failed", details: err?.details || null },
-        err?.statusCode || 502,
-      );
-    }
-  }
-
-  if (req.method === "GET" && path === "/t2hub/status") {
-    const expected = (Deno.env.get("T2HUB_BOOTSTRAP_TOKEN") || "").trim();
-    if (!expected) {
-      return json({ ok: false, error: "T2HUB_BOOTSTRAP_TOKEN is not configured" }, 503);
-    }
-    const auth = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-    if (auth !== expected) {
-      return json({ ok: false, error: "Invalid bootstrap token" }, 401);
-    }
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    if (!supabaseUrl || !serviceRoleKey) {
-      return json({ ok: false, error: "Supabase env not configured" }, 500);
-    }
-    try {
-      const session = await loadT2HubSession(supabaseUrl, serviceRoleKey);
-      const bootstrappedAt = session.bootstrappedAt || null;
-      const ageMs = bootstrappedAt ? Date.now() - Date.parse(bootstrappedAt) : null;
-      return json({
-        ok: true,
-        bootstrapped: true,
-        appPath: session.appPath,
-        bootstrappedAt,
-        ageMs,
-        lastUsedAt: session.lastUsedAt,
-      });
-    } catch (err: any) {
-      if (err?.code === T2HUB_SESSION_MISSING_CODE) {
-        return json({ ok: true, bootstrapped: false, code: T2HUB_SESSION_MISSING_CODE });
-      }
-      return json(
-        { ok: false, error: err?.message || "status failed", details: err?.details || null },
-        err?.statusCode || 500,
-      );
-    }
-  }
-
   try {
     const { user, svpToken } = await requireAuth(req);
 
-    // ── Available dates (with fallbacks) ──────────────────────
+    // ΓöÇΓöÇ Available dates (with fallbacks) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/available-dates") {
       const paths = [
         "/api/v1/individual_labor_space/exam_sessions/available_dates",
@@ -906,7 +840,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Live SVP cities and test centers ─────────────────────
+    // ΓöÇΓöÇ Live SVP cities and test centers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/cities") {
       const params = new URLSearchParams(query);
       params.delete("locale");
@@ -942,7 +876,7 @@ Deno.serve(async (req) => {
       return json({ test_centers: centers, centers, city: requestedCity });
     }
 
-    // ── Date-scoped centre availability ───────────────────────
+    // ΓöÇΓöÇ Date-scoped centre availability ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     // The SVP available-dates endpoint is city-level. This route deliberately
     // checks every real centre for the selected date so the UI never offers a
     // centre that has no scheduled session on that date.
@@ -994,7 +928,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── t2hub city test centers ──────────────────────────────
+    // ΓöÇΓöÇ t2hub city test centers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/t2hub/test-centers") {
       const params = new URLSearchParams(query);
       params.delete("locale");
@@ -1022,9 +956,9 @@ Deno.serve(async (req) => {
       return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query)), req));
     }
 
-    // ── t2hub bulk exam sessions (CSRF-protected POST) ─────────
+    // ΓöÇΓöÇ t2hub bulk exam sessions (CSRF-protected POST) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     // Batches multiple {category_id, city, exam_date, center_token, center}
-    // lookups into a single request — more efficient than repeated single-city
+    // lookups into a single request ΓÇö more efficient than repeated single-city
     // calls to /pacc-exam-sessions when checking several centers/dates at once.
     if (req.method === "POST" && path === "/t2hub/exam-sessions-bulk") {
       const body = await req.json().catch(() => ({}));
@@ -1036,7 +970,7 @@ Deno.serve(async (req) => {
       return json(data);
     }
 
-    // ── t2hub city-wide PACC sessions ────────────────────────
+    // ΓöÇΓöÇ t2hub city-wide PACC sessions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/t2hub/pacc-exam-sessions") {
       const params = new URLSearchParams(query);
       params.delete("locale");
@@ -1061,7 +995,7 @@ Deno.serve(async (req) => {
       return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
     }
 
-    // ── Strict center-scoped live SVP exam sessions ───────────
+    // ΓöÇΓöÇ Strict center-scoped live SVP exam sessions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/exam-sessions") {
       const params = new URLSearchParams(query);
       const categoryId = params.get("category_id") || "";
@@ -1113,7 +1047,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Exam sessions (enriched with available_seats) ────────
+    // ΓöÇΓöÇ Exam sessions (enriched with available_seats) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/exam-sessions") {
       const sessionParams = new URLSearchParams(query);
       const city = sessionParams.get("city") || "";
@@ -1180,7 +1114,7 @@ Deno.serve(async (req) => {
       return json(listData);
     }
 
-    // ── User balance (auto-detect SVP user ID) ───────────────
+    // ΓöÇΓöÇ User balance (auto-detect SVP user ID) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/user-balance") {
       const supabase = getSupabase();
       const { data: session } = await supabase
@@ -1206,7 +1140,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Ticket PDF ────────────────────────────────────────────
+    // ΓöÇΓöÇ Ticket PDF ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     const pdfMatch = path.match(/^\/tickets\/([^/]+)\/show-pdf$/);
     if (req.method === "GET" && pdfMatch) {
       await requireAccessPermission(req, "reservation.manage");
@@ -1227,7 +1161,7 @@ Deno.serve(async (req) => {
       return new Response(await upstream.arrayBuffer(), { status: 200, headers });
     }
 
-    // ── Center-bound temporary seat hold ─────────────────────
+    // ΓöÇΓöÇ Center-bound temporary seat hold ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "POST" && path === "/temporary-seats") {
       const body = await req.json().catch(() => ({}));
       const examSessionId = body?.exam_session_id;
@@ -1249,7 +1183,7 @@ Deno.serve(async (req) => {
       return json(data);
     }
 
-    // ── Standard routes ──────────────────────────────────────
+    // ΓöÇΓöÇ Standard routes ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     for (const route of routes) {
       if (req.method !== route.method) continue;
       const match = path.match(route.pattern);
@@ -1378,7 +1312,7 @@ Deno.serve(async (req) => {
     const message = err?.message || "Server error";
     // Surface both the nested and flat shape so legacy client code that
     // reads data.message keeps working alongside new code that reads
-    // data.code (e.g. the BookingPage's t2hub-missing banner).
+    // data.code (e.g. the booking page's t2hub-missing bridge trigger).
     return json(
       {
         message,
