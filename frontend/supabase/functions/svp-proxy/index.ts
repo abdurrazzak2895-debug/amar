@@ -8,6 +8,16 @@ import {
   getReservationLookupId,
   reshapeReservationPayload,
 } from "./reservation-utils.ts";
+import {
+  bootstrapT2HubSession,
+  clearLiveSession,
+  getLastT2HubCookie,
+  loadT2HubSession,
+  persistT2HubSession,
+  setLastT2HubCookie,
+  T2HUB_SESSION_MISSING_CODE,
+  type T2HubSessionLike,
+} from "./t2hub-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,7 +32,8 @@ function json(data: unknown, status = 200) {
     ...corsHeaders,
     "Content-Type": "application/json",
   };
-  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
+  const lastCookie = getLastT2HubCookie();
+  if (lastCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastCookie;
   return new Response(JSON.stringify(data), { status, headers });
 }
 
@@ -154,21 +165,9 @@ function findReservationId(value: any): string {
   return "";
 }
 
-let t2hubSession:
-  | {
-      keyRaw: string;
-      cookie: string;
-      csrfToken: string;
-      appPath: string;
-      expiresAt: number;
-    }
-  | null = null;
-
-// After every t2hub call we stash the most recent cookies here so the
-// response builder can echo them back to the caller in
-// `x-t2hub-cookie`. The caller is responsible for keeping its own copy in
-// sync — these cookies rotate on every t2hub response.
-let lastT2HubCookie = "";
+// t2hub session material lives in t2hub-session.ts (DB-backed) and the
+// most-recent-cookie echo state is held there too. The declarations below
+// are intentionally not duplicated in this file.
 
 // The t2hub landing page, every JSON API call, and the encrypted envelope
 // (x-encrypted: 1) all rotate the session and CSRF cookies. We must keep the
@@ -286,42 +285,25 @@ function extractT2HubCsrf(html: string): string {
   );
 }
 
-async function fetchT2HubSessionPage(appPath: string) {
-  const res = await fetch(`${T2HUB_BASE}${appPath}`, {
-    headers: {
-      Accept: "text/html",
-      "User-Agent": SVP_UA,
-    },
-  });
-  const html = await res.text();
-  return { res, html, keyRaw: extractT2HubKey(html) };
-}
-
 async function getT2HubSession() {
-  if (t2hubSession && t2hubSession.expiresAt > Date.now()) return t2hubSession;
+  // Delegate to the persistent, DB-backed session module. The previous
+  // implementation tried to bootstrap a session by hitting the public
+  // t2hub landing page; that worked only as long as cookies from a prior
+  // caller were still fresh in module state. The new flow reads from
+  // public.t2hub_sessions and surfaces a clear T2HUB_SESSION_MISSING error
+  // when the admin hasn't bootstrapped yet.
+  const cached = getLiveSession();
+  if (cached) return cached;
 
-  const appPaths = [T2HUB_APP_PATH, `${T2HUB_APP_PATH}/`, `${T2HUB_APP_PATH}/agent/login`];
-  let lastStatus = 0;
-  for (const appPath of appPaths) {
-    const { res, html, keyRaw } = await fetchT2HubSessionPage(appPath);
-    lastStatus = res.status;
-    if (!res.ok || !keyRaw) continue;
-
-    t2hubSession = {
-      keyRaw,
-      csrfToken: extractT2HubCsrf(html),
-      cookie: extractT2HubCookie(res.headers),
-      appPath,
-      expiresAt: Date.now() + 10 * 60 * 1000,
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw {
+      statusCode: 500,
+      message: "Supabase environment is not configured for t2hub session lookup",
     };
-    return t2hubSession;
   }
-
-  throw {
-    statusCode: 502,
-    message: "Failed to initialize t2hub session",
-    details: { status: lastStatus || undefined },
-  };
+  return await loadT2HubSession(supabaseUrl, serviceRoleKey);
 }
 
 // t2hub uses Laravel's Crypt::encrypt with AES-256-GCM. The encrypted envelope
@@ -372,7 +354,7 @@ async function decodeT2HubResponse(res: Response, keyRaw: string) {
   return await decryptT2HubEnvelope(envelope, keyRaw);
 }
 
-async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSession>) {
+async function fetchT2HubJson(path: string, session: T2HubSessionLike) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
@@ -396,7 +378,7 @@ async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSes
   }
 }
 
-async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNullable<typeof t2hubSession>) {
+async function fetchT2HubJsonPost(path: string, body: unknown, session: T2HubSessionLike) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
@@ -432,7 +414,7 @@ async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNulla
 async function t2hubFetch(path: string, req: Request): Promise<any> {
   const provided = t2HubHeadersFromRequest(req);
   if (provided) {
-    const session: NonNullable<typeof t2hubSession> = {
+    const session: T2HubSessionLike = {
       keyRaw: provided.keyRaw,
       cookie: provided.cookie,
       csrfToken: "",
@@ -440,22 +422,25 @@ async function t2hubFetch(path: string, req: Request): Promise<any> {
       expiresAt: Date.now() + 10 * 60 * 1000,
     };
     const data = await fetchT2HubJson(path, session);
-    lastT2HubCookie = session.cookie;
+    setLastT2HubCookie(session.cookie);
     return data;
   }
-  // Fallback: server-side cached session. Only works if a previous caller
-  // bootstrapped the proxy by providing their cookies once.
+  // Fallback: server-side cached session. The session is loaded from
+  // public.t2hub_sessions and cached in module memory for 10 min.
   const session = await getT2HubSession();
   try {
     const data = await fetchT2HubJson(path, session);
-    lastT2HubCookie = session.cookie;
+    setLastT2HubCookie(session.cookie);
     return data;
   } catch (err: any) {
     if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
-      t2hubSession = null;
+      // Crypto failure means the persisted session has stale material. Clear
+      // the in-memory cache so the next call re-reads from the DB and a
+      // subsequent /t2hub/bootstrap can refresh it.
+      clearLiveSession();
       const fresh = await getT2HubSession();
       const data = await fetchT2HubJson(path, fresh);
-      lastT2HubCookie = fresh.cookie;
+      setLastT2HubCookie(fresh.cookie);
       return data;
     }
     throw err;
@@ -465,7 +450,7 @@ async function t2hubFetch(path: string, req: Request): Promise<any> {
 async function t2hubPost(path: string, body: unknown, req: Request): Promise<any> {
   const provided = t2HubHeadersFromRequest(req);
   if (provided) {
-    const session: NonNullable<typeof t2hubSession> = {
+    const session: T2HubSessionLike = {
       keyRaw: provided.keyRaw,
       cookie: provided.cookie,
       csrfToken: "",
@@ -473,20 +458,20 @@ async function t2hubPost(path: string, body: unknown, req: Request): Promise<any
       expiresAt: Date.now() + 10 * 60 * 1000,
     };
     const data = await fetchT2HubJsonPost(path, body, session);
-    lastT2HubCookie = session.cookie;
+    setLastT2HubCookie(session.cookie);
     return data;
   }
   const session = await getT2HubSession();
   try {
     const data = await fetchT2HubJsonPost(path, body, session);
-    lastT2HubCookie = session.cookie;
+    setLastT2HubCookie(session.cookie);
     return data;
   } catch (err: any) {
     if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
-      t2hubSession = null;
+      clearLiveSession();
       const fresh = await getT2HubSession();
       const data = await fetchT2HubJsonPost(path, body, fresh);
-      lastT2HubCookie = fresh.cookie;
+      setLastT2HubCookie(fresh.cookie);
       return data;
     }
     throw err;
@@ -498,7 +483,7 @@ function jsonWithT2HubCookie(data: unknown, status = 200) {
     ...corsHeaders,
     "Content-Type": "application/json",
   };
-  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
+  if (getLastT2HubCookie()) headers[T2HUB_RESPONSE_COOKIE_HEADER] = getLastT2HubCookie();
   return new Response(JSON.stringify(data), { status, headers });
 }
 
@@ -788,6 +773,94 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/svp-proxy/, "");
   const query = url.search.replace(/^\?/, "");
+
+  // ── Admin: t2hub session bootstrap (no SVP auth required) ─────
+  // The svp-proxy relies on a shared t2hub.app session for read-only
+  // booking data (occupations, available dates, test centers, exam sessions
+  // bulk). When the proxy cold-starts without that session, the first
+  // /occupations or /available-dates call would 503 with
+  // T2HUB_SESSION_MISSING. An admin hits this endpoint once to fetch
+  // t2hub's landing page server-side and persist the cookies + AES key
+  // to public.t2hub_sessions. Subsequent calls reuse the cached row.
+  //
+  // Authentication: pass `Authorization: Bearer <T2HUB_BOOTSTRAP_TOKEN>`
+  // matching the T2HUB_BOOTSTRAP_TOKEN env var. When the env var is unset
+  // (local dev) the endpoint refuses all callers.
+  if (req.method === "POST" && path === "/t2hub/bootstrap") {
+    const expected = (Deno.env.get("T2HUB_BOOTSTRAP_TOKEN") || "").trim();
+    if (!expected) {
+      return json({ error: "T2HUB_BOOTSTRAP_TOKEN is not configured" }, 503);
+    }
+    const auth = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    if (auth !== expected) {
+      return json({ error: "Invalid bootstrap token" }, 401);
+    }
+    try {
+      const result = await bootstrapT2HubSession();
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+      if (!supabaseUrl || !serviceRoleKey) {
+        return json({ error: "Supabase env not configured" }, 500);
+      }
+      await persistT2HubSession(supabaseUrl, serviceRoleKey, {
+        cookie: result.cookie,
+        keyRaw: result.keyRaw,
+        csrfToken: result.csrfToken,
+        appPath: result.appPath,
+        bootstrappedAt: result.bootstrappedAt,
+        lastUsedAt: result.bootstrappedAt,
+      });
+      return json({
+        ok: true,
+        appPath: result.appPath,
+        bootstrappedAt: result.bootstrappedAt,
+        cookieLength: result.cookie.length,
+        keyLength: result.keyRaw.length,
+      });
+    } catch (err: any) {
+      return json(
+        { error: err?.message || "bootstrap failed", details: err?.details || null },
+        err?.statusCode || 502,
+      );
+    }
+  }
+
+  if (req.method === "GET" && path === "/t2hub/status") {
+    const expected = (Deno.env.get("T2HUB_BOOTSTRAP_TOKEN") || "").trim();
+    if (!expected) {
+      return json({ ok: false, error: "T2HUB_BOOTSTRAP_TOKEN is not configured" }, 503);
+    }
+    const auth = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    if (auth !== expected) {
+      return json({ ok: false, error: "Invalid bootstrap token" }, 401);
+    }
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!supabaseUrl || !serviceRoleKey) {
+      return json({ ok: false, error: "Supabase env not configured" }, 500);
+    }
+    try {
+      const session = await loadT2HubSession(supabaseUrl, serviceRoleKey);
+      const bootstrappedAt = session.bootstrappedAt || null;
+      const ageMs = bootstrappedAt ? Date.now() - Date.parse(bootstrappedAt) : null;
+      return json({
+        ok: true,
+        bootstrapped: true,
+        appPath: session.appPath,
+        bootstrappedAt,
+        ageMs,
+        lastUsedAt: session.lastUsedAt,
+      });
+    } catch (err: any) {
+      if (err?.code === T2HUB_SESSION_MISSING_CODE) {
+        return json({ ok: true, bootstrapped: false, code: T2HUB_SESSION_MISSING_CODE });
+      }
+      return json(
+        { ok: false, error: err?.message || "status failed", details: err?.details || null },
+        err?.statusCode || 500,
+      );
+    }
+  }
 
   try {
     const { user, svpToken } = await requireAuth(req);
@@ -1301,6 +1374,23 @@ Deno.serve(async (req) => {
     return json({ error: "Not found" }, 404);
   } catch (err: any) {
     const status = Number(err?.statusCode || 500);
-    return json({ error: { code: err?.code || (status === 401 ? "AUTH_REQUIRED" : "SVP_PROXY_ERROR"), message: err?.message || "Server error", request_id: req.headers.get("x-request-id") || null } }, status);
+    const code = err?.code || (status === 401 ? "AUTH_REQUIRED" : "SVP_PROXY_ERROR");
+    const message = err?.message || "Server error";
+    // Surface both the nested and flat shape so legacy client code that
+    // reads data.message keeps working alongside new code that reads
+    // data.code (e.g. the BookingPage's t2hub-missing banner).
+    return json(
+      {
+        message,
+        code,
+        error: {
+          code,
+          message,
+          request_id: req.headers.get("x-request-id") || null,
+        },
+        request_id: req.headers.get("x-request-id") || null,
+      },
+      status,
+    );
   }
 });

@@ -15,6 +15,8 @@ import {
   mergeVerifiedCityCenterRoster,
   formatDateLabel, detectBookingMode, resolveSessionCenter, resolveVerifiedSessionCenterId, SectionCenterRule,
   isNoExamSession422,
+  isT2HubSessionMissing,
+  T2HUB_SESSION_MISSING_MESSAGE,
 } from "@/lib/booking-utils";
 import "@/styles/booking-premium.css";
 import { useAccessAuth } from "@/contexts/AccessAuthContext";
@@ -552,7 +554,7 @@ export default function BookingPage() {
           return true;
         });
         setOccupations(unique.map(normalizeOccupation));
-      } catch (err: any) { setError(err?.message || "Failed to load occupations"); }
+      } catch (err: any) { setError(isT2HubSessionMissing(err) ? T2HUB_SESSION_MISSING_MESSAGE : (err?.message || "Failed to load occupations")); }
       finally { setLoadingOccupations(false); }
     })();
   }, []);
@@ -613,7 +615,7 @@ export default function BookingPage() {
         setLiveCityOptions(cities);
         setAvailableDateEntries(entries);
         setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || ""));
-      } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(err?.message || "Failed to load available dates"); }
+      } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(isT2HubSessionMissing(err) ? T2HUB_SESSION_MISSING_MESSAGE : (err?.message || "Failed to load available dates")); }
       finally { if (active) setLoadingDates(false); }
     })();
     return () => { active = false; };
@@ -706,7 +708,7 @@ export default function BookingPage() {
       } catch (err: any) {
         if (!active) return;
         setCityCenterOptions([]);
-        setError(err?.message || "Failed to load live SVP test centers");
+        setError(isT2HubSessionMissing(err) ? T2HUB_SESSION_MISSING_MESSAGE : (err?.message || "Failed to load live SVP test centers"));
       }
     })();
     return () => { active = false; };
