@@ -12,15 +12,18 @@ import {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-access-token, x-request-id, x-client-info, apikey, content-type",
+    "authorization, x-access-token, x-request-id, x-client-info, apikey, content-type, x-t2hub-cookie, x-t2hub-key",
+  "Access-Control-Expose-Headers": "x-t2hub-cookie",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
 function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+  const headers: Record<string, string> = {
+    ...corsHeaders,
+    "Content-Type": "application/json",
+  };
+  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
+  return new Response(JSON.stringify(data), { status, headers });
 }
 
 function getSupabase() {
@@ -152,8 +155,68 @@ function findReservationId(value: any): string {
 }
 
 let t2hubSession:
-  | { keyRaw: string; cookie: string; appPath: string; expiresAt: number }
+  | {
+      keyRaw: string;
+      cookie: string;
+      csrfToken: string;
+      appPath: string;
+      expiresAt: number;
+    }
   | null = null;
+
+// After every t2hub call we stash the most recent cookies here so the
+// response builder can echo them back to the caller in
+// `x-t2hub-cookie`. The caller is responsible for keeping its own copy in
+// sync — these cookies rotate on every t2hub response.
+let lastT2HubCookie = "";
+
+// The t2hub landing page, every JSON API call, and the encrypted envelope
+// (x-encrypted: 1) all rotate the session and CSRF cookies. We must keep the
+// "real" XSRF-TOKEN from the meta tag (URL-encoded) and the Laravel session
+// payload from the most recent response. Once a t2_hub_session cookie goes
+// stale, the API returns 401/419 even with a fresh key, so this state is the
+// most important thing the proxy maintains.
+//
+// t2hub is a stateful Laravel app — a fresh server has no session. Callers
+// MUST pass their logged-in t2hub cookies (and the session key from
+// `window.__sk`) via the `x-t2hub-cookie` and `x-t2hub-key` request headers
+// so we can hit the read-only API on their behalf. After each call we return
+// any rotated cookies in the `x-t2hub-cookie` response header so the caller
+// can keep its own copy fresh.
+const T2HUB_KEY_HEADER = "x-t2hub-key";
+const T2HUB_COOKIE_HEADER = "x-t2hub-cookie";
+const T2HUB_RESPONSE_COOKIE_HEADER = "x-t2hub-cookie";
+
+function t2HubHeadersFromRequest(req: Request): { keyRaw: string; cookie: string } | null {
+  const keyRaw = req.headers.get(T2HUB_KEY_HEADER)?.trim() || "";
+  const cookie = req.headers.get(T2HUB_COOKIE_HEADER)?.trim() || "";
+  if (!keyRaw || !cookie) return null;
+  return { keyRaw, cookie };
+}
+
+function parseCookieHeader(header: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!header) return out;
+  for (const part of header.split(/,(?=\s*[^;,]+=)/)) {
+    const [raw] = part.split(";");
+    const eq = raw.indexOf("=");
+    if (eq < 0) continue;
+    const name = raw.slice(0, eq).trim();
+    const value = raw.slice(eq + 1).trim();
+    if (name && value) out.set(name, value);
+  }
+  return out;
+}
+
+function mergeCookieHeader(previous: string, additions: string): string {
+  const merged = parseCookieHeader(previous);
+  for (const [name, value] of parseCookieHeader(additions)) {
+    merged.set(name, value);
+  }
+  return Array.from(merged.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
+}
 
 async function svpFetch(
   path: string,
@@ -206,15 +269,11 @@ async function svpFetchRaw(
   });
 }
 
-function extractT2HubCookie(headers: Headers): string {
+function extractT2HubCookie(headers: Headers, previous = ""): string {
   const anyHeaders = headers as Headers & { getSetCookie?: () => string[] };
   const setCookies = anyHeaders.getSetCookie?.() || [];
-  const raw = setCookies.length ? setCookies : [headers.get("set-cookie") || ""];
-  return raw
-    .flatMap((item) => item.split(/,(?=\s*[^;,]+=)/))
-    .map((item) => item.trim().split(";")[0])
-    .filter(Boolean)
-    .join("; ");
+  const raw = setCookies.length ? setCookies.join(",") : headers.get("set-cookie") || "";
+  return mergeCookieHeader(previous, raw);
 }
 
 function extractT2HubKey(html: string): string {
@@ -222,7 +281,9 @@ function extractT2HubKey(html: string): string {
 }
 
 function extractT2HubCsrf(html: string): string {
-  return html.match(/<meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/)?.[1] || "";
+  return (
+    html.match(/<meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']/)?.[1] || ""
+  );
 }
 
 async function fetchT2HubSessionPage(appPath: string) {
@@ -263,6 +324,12 @@ async function getT2HubSession() {
   };
 }
 
+// t2hub uses Laravel's Crypt::encrypt with AES-256-GCM. The encrypted envelope
+// has `{p, iv}` where both are base64-encoded. The body is the base64 string
+// itself (Content-Encoding: gzip was already inflated by Deno's fetch), so
+// decoding must happen before JSON parsing. The landing page also exposes the
+// session key in `window.__sk` (also base64), which we use to import the
+// AES-GCM key.
 async function decryptT2HubEnvelope(envelope: any, keyRaw: string) {
   if (!envelope?.p || !envelope?.iv) return envelope;
   const keyBytes = Uint8Array.from(atob(keyRaw), (c) => c.charCodeAt(0));
@@ -271,6 +338,38 @@ async function decryptT2HubEnvelope(envelope: any, keyRaw: string) {
   const cipher = Uint8Array.from(atob(envelope.p), (c) => c.charCodeAt(0));
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
   return JSON.parse(new TextDecoder().decode(plain));
+}
+
+// Some t2hub endpoints (e.g. /token-status) return a plaintext JSON body when
+// the request lacks valid cookies, then flip to encrypted once the session is
+// established. We must not try to decrypt plaintext, so the trigger is the
+// `x-encrypted: 1` response header.
+async function decodeT2HubResponse(res: Response, keyRaw: string) {
+  const text = await res.text();
+  const isEncrypted = (res.headers.get("x-encrypted") || "").trim() === "1";
+  if (!isEncrypted) {
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return { raw: text };
+    }
+  }
+  // The encrypted body is a base64 string, not JSON. Parse it as JSON first
+  // (Laravel returns it as a quoted string), then unwrap the envelope.
+  let envelope: any = text;
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    // Body may already be a raw base64 string, not JSON-encoded.
+  }
+  if (typeof envelope === "string") {
+    try {
+      envelope = JSON.parse(envelope);
+    } catch {
+      /* not JSON — keep as raw */
+    }
+  }
+  return await decryptT2HubEnvelope(envelope, keyRaw);
 }
 
 async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSession>) {
@@ -286,17 +385,12 @@ async function fetchT2HubJson(path: string, session: NonNullable<typeof t2hubSes
         ...(session.cookie ? { Cookie: session.cookie } : {}),
       },
     });
-    const text = await res.text();
-    let data: any;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
+    session.cookie = extractT2HubCookie(res.headers, session.cookie);
     if (!res.ok) {
-      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
+      const details = await decodeT2HubResponse(res, session.keyRaw).catch(() => null);
+      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details };
     }
-    return data;
+    return await decodeT2HubResponse(res, session.keyRaw);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -316,54 +410,96 @@ async function fetchT2HubJsonPost(path: string, body: unknown, session: NonNulla
         "User-Agent": SVP_UA,
         // Confirmed from live traffic: this endpoint is Laravel-CSRF-protected —
         // POSTing without a matching X-CSRF-TOKEN (bound to the session cookie)
-        // fails with 419. GET endpoints don't need this.
+        // fails with 419. The XSRF-TOKEN cookie value is URL-encoded while the
+        // header value is the raw meta-tag value, and Laravel compares them
+        // after a decode. Send the latest value from the most recent response.
         ...(session.csrfToken ? { "X-CSRF-TOKEN": session.csrfToken } : {}),
         ...(session.cookie ? { Cookie: session.cookie } : {}),
       },
       body: JSON.stringify(body),
     });
-    const text = await res.text();
-    let data: any;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
+    session.cookie = extractT2HubCookie(res.headers, session.cookie);
     if (!res.ok) {
-      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details: data };
+      const details = await decodeT2HubResponse(res, session.keyRaw).catch(() => null);
+      throw { statusCode: res.status, message: `t2hub request failed: ${res.status}`, details };
     }
-    return data;
+    return await decodeT2HubResponse(res, session.keyRaw);
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function t2hubFetch(path: string) {
+async function t2hubFetch(path: string, req: Request): Promise<any> {
+  const provided = t2HubHeadersFromRequest(req);
+  if (provided) {
+    const session: NonNullable<typeof t2hubSession> = {
+      keyRaw: provided.keyRaw,
+      cookie: provided.cookie,
+      csrfToken: "",
+      appPath: T2HUB_APP_PATH,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+    const data = await fetchT2HubJson(path, session);
+    lastT2HubCookie = session.cookie;
+    return data;
+  }
+  // Fallback: server-side cached session. Only works if a previous caller
+  // bootstrapped the proxy by providing their cookies once.
   const session = await getT2HubSession();
-  const data = await fetchT2HubJson(path, session);
-
   try {
-    return await decryptT2HubEnvelope(data, session.keyRaw);
-  } catch {
-    t2hubSession = null;
-    const fresh = await getT2HubSession();
-    const freshData = await fetchT2HubJson(path, fresh);
-    return await decryptT2HubEnvelope(freshData, fresh.keyRaw);
+    const data = await fetchT2HubJson(path, session);
+    lastT2HubCookie = session.cookie;
+    return data;
+  } catch (err: any) {
+    if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
+      t2hubSession = null;
+      const fresh = await getT2HubSession();
+      const data = await fetchT2HubJson(path, fresh);
+      lastT2HubCookie = fresh.cookie;
+      return data;
+    }
+    throw err;
   }
 }
 
-async function t2hubPost(path: string, body: unknown) {
-  const session = await getT2HubSession();
-  const data = await fetchT2HubJsonPost(path, body, session);
-
-  try {
-    return await decryptT2HubEnvelope(data, session.keyRaw);
-  } catch {
-    t2hubSession = null;
-    const fresh = await getT2HubSession();
-    const freshData = await fetchT2HubJsonPost(path, body, fresh);
-    return await decryptT2HubEnvelope(freshData, fresh.keyRaw);
+async function t2hubPost(path: string, body: unknown, req: Request): Promise<any> {
+  const provided = t2HubHeadersFromRequest(req);
+  if (provided) {
+    const session: NonNullable<typeof t2hubSession> = {
+      keyRaw: provided.keyRaw,
+      cookie: provided.cookie,
+      csrfToken: "",
+      appPath: T2HUB_APP_PATH,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+    const data = await fetchT2HubJsonPost(path, body, session);
+    lastT2HubCookie = session.cookie;
+    return data;
   }
+  const session = await getT2HubSession();
+  try {
+    const data = await fetchT2HubJsonPost(path, body, session);
+    lastT2HubCookie = session.cookie;
+    return data;
+  } catch (err: any) {
+    if (err?.message?.includes("OperationError") || err?.message?.includes("decrypt")) {
+      t2hubSession = null;
+      const fresh = await getT2HubSession();
+      const data = await fetchT2HubJsonPost(path, body, fresh);
+      lastT2HubCookie = fresh.cookie;
+      return data;
+    }
+    throw err;
+  }
+}
+
+function jsonWithT2HubCookie(data: unknown, status = 200) {
+  const headers: Record<string, string> = {
+    ...corsHeaders,
+    "Content-Type": "application/json",
+  };
+  if (lastT2HubCookie) headers[T2HUB_RESPONSE_COOKIE_HEADER] = lastT2HubCookie;
+  return new Response(JSON.stringify(data), { status, headers });
 }
 
 function t2hubQuery(path: string, params: URLSearchParams) {
@@ -678,7 +814,7 @@ Deno.serve(async (req) => {
 
       // The official SVP date routes are not consistently available. Use the
       // corresponding t2hub calendar endpoint when all of them return 404.
-      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", params)));
+      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", params), req));
     }
 
     // Keep the existing `/occupations` client contract, while using t2hub's
@@ -693,7 +829,7 @@ Deno.serve(async (req) => {
         if (err?.statusCode !== 404) throw err;
         const params = new URLSearchParams(query);
         params.delete("locale");
-        return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params)));
+        return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params), req));
       }
     }
 
@@ -795,22 +931,22 @@ Deno.serve(async (req) => {
       if (!city) throw { statusCode: 400, message: "Missing city or division" };
       params.delete("city");
       params.set("division", city);
-      const data = await t2hubFetch(t2hubQuery("/test-centers", params));
+      const data = await t2hubFetch(t2hubQuery("/test-centers", params), req);
       return json(data);
     }
 
     // These routes are intentionally proxied: t2hub responses are encrypted
     // (`x-encrypted: 1`) and browser callers are subject to cross-origin rules.
     if (req.method === "GET" && path === "/t2hub/occupations") {
-      return json(await t2hubFetch(t2hubQuery("/pacc/occupations", new URLSearchParams(query))));
+      return json(await t2hubFetch(t2hubQuery("/pacc/occupations", new URLSearchParams(query)), req));
     }
 
     if (req.method === "GET" && path === "/t2hub/exam-available-dates") {
-      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", new URLSearchParams(query))));
+      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", new URLSearchParams(query)), req));
     }
 
     if (req.method === "GET" && path === "/t2hub/exam-sessions-bulk") {
-      return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query))));
+      return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query)), req));
     }
 
     // ── t2hub bulk exam sessions (CSRF-protected POST) ─────────
@@ -823,7 +959,7 @@ Deno.serve(async (req) => {
       if (!Array.isArray(requests) || !requests.length) {
         throw { statusCode: 400, message: "Missing requests array" };
       }
-      const data = await t2hubPost(`${T2HUB_APP_PATH}/api/exam-sessions-bulk`, { requests });
+      const data = await t2hubPost(`${T2HUB_APP_PATH}/api/exam-sessions-bulk`, { requests }, req);
       return json(data);
     }
 
@@ -839,8 +975,8 @@ Deno.serve(async (req) => {
       }
 
       const [centersData, sessionsData] = await Promise.all([
-        t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city }))),
-        t2hubFetch(t2hubQuery("/exam-sessions-bulk", params)),
+        t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req),
+        t2hubFetch(t2hubQuery("/exam-sessions-bulk", params), req),
       ]);
       const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
       const centerByName = new Map(
@@ -914,8 +1050,8 @@ Deno.serve(async (req) => {
         try {
           sessionParams.delete("locale");
           const [centersData, sessionsData] = await Promise.all([
-            t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city }))),
-            t2hubFetch(t2hubQuery("/exam-sessions-bulk", sessionParams)),
+            t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req),
+            t2hubFetch(t2hubQuery("/exam-sessions-bulk", sessionParams), req),
           ]);
           const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
           const centerByName = new Map(
