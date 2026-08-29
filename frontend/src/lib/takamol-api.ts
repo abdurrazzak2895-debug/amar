@@ -31,8 +31,8 @@ const TAKAMOL_RAW_URL = TAKAMOL_ENV_URL || "https://takamol-api.up.railway.app";
  *    this app. This avoids CORS (the function sets its own headers) and
  *    means Vercel no longer needs a hardcoded Railway rewrite.
  */
-const isProductionBrowser = typeof window !== "undefined" && /(^|\.)t2hub\.app$|(^|\.)vercel\.app$/.test(window.location.hostname);
-const API_BASE = isProductionBrowser
+const isVercelBrowser = typeof window !== "undefined" && /(^|\.)vercel\.app$/.test(window.location.hostname);
+const API_BASE = isVercelBrowser
   ? "/api/takamol/proxy"
   : (TAKAMOL_ENV_URL || `${SUPABASE_URL}/functions/v1/takamol-proxy`);
 
