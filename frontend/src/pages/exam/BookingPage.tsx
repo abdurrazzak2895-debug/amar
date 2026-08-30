@@ -1249,10 +1249,8 @@ export default function BookingPage() {
         setStatus(`Reservation rescheduled successfully: #${nextReservationId}`);
         if (nextReservationId) await openTicketPdf(String(nextReservationId), data);
       } else {
-        // Normal new booking. The selected encrypted exam_session_id is the
-        // authoritative SVP center binding. The temporary hold is required by
-        // this page as a precondition, but the shared builder deliberately
-        // omits stale center/hold overrides from the SVP confirm request.
+        // Normal new booking. Pass the real hold_id from the temporary seat
+        // so SVP links the reservation to the held seat.
         const data: any = await api("/exam-reservations", {
           method: "POST", body: {
             ...buildExamReservationPayload({
@@ -1261,6 +1259,7 @@ export default function BookingPage() {
               methodology,
               languageCode: effectiveLanguageCode,
             }),
+            hold_id: holdId ? Number(holdId) : null,
             country_id: 78,
             test_center_id: String(selectedCenterId),
             accept_declaration: true,
