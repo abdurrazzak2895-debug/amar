@@ -1652,15 +1652,6 @@ export default function BookingPage() {
                 <option value="">{loadingCenterAvailability ? "Checking centres for this date…" : loadingSessions ? "Loading live centers…" : "Select live SVP test center"}</option>
                 {centerOptions.map((item) => <option key={item.siteId} value={item.siteId}>{item.name} — Site #{item.siteId}</option>)}
               </select>
-              {loadingCenterAvailability ? <small className="bk-date-help">Checking official SVP session availability for {formatDateLabel(availableDate)}. Only centres with sessions will remain selectable.</small> : null}
-              {!loadingCenterAvailability && dateScopedCenters !== null && !centerOptions.length ? <small className="bk-error-text">No test centre has an available SVP session for {formatDateLabel(availableDate)} in {selectedCity}. Try another date.</small> : null}
-              {!loadingCenterAvailability && dateScopedCenters !== null && centerOptions.length ? <small className="bk-date-help">Only test centres with an available session on the selected date are shown.</small> : null}
-              {selectedCenterOption ? <small className="bk-date-help">Live centre: {selectedCenterOption.name} · ID {selectedCenterOption.siteId} · {selectedCenterOption.city}</small> : null}
-              {selectedCenterOption && availableDate ? (
-                <small className="bk-date-help">
-                  Selected-centre only: a seat can be secured only at {selectedCenterOption.name} on {formatDateLabel(availableDate)}. If that centre has no session on this date, booking stops—no other centre or session is substituted.
-                </small>
-              ) : null}
             </div>
 
             <div className="bk-field">
