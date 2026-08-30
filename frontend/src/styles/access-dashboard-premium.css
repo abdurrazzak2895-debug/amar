@@ -475,6 +475,149 @@
 .ap-self strong { font-size: 12px; color: var(--green); font-weight: 600; }
 .ap-self span { color: var(--muted); font-size: 10px; }
 
+/* ── Form Fields ──────────────────────────────────────────────────── */
+.ap-field { display: flex; flex-direction: column; gap: 5px; }
+.ap-field span { font-size: 12px; font-weight: 600; color: var(--text); }
+.ap-field input, .ap-field select {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  transition: border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ap-field input:focus, .ap-field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 95, 255, 0.1); }
+.ap-field--check { flex-direction: row; align-items: center; gap: 8px; padding: 8px 0; }
+.ap-field--check input { width: 16px; height: 16px; }
+.ap-field--check span { font-size: 13px; }
+
+/* ── Data Table ───────────────────────────────────────────────────── */
+.ap-table { width: 100%; border-collapse: collapse; }
+.ap-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--line);
+}
+.ap-table td {
+  padding: 12px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f1f5;
+  vertical-align: middle;
+}
+.ap-table tr:last-child td { border-bottom: none; }
+.ap-table tr:hover td { background: #fafbfc; }
+.ap-table td strong { font-weight: 600; }
+.ap-table td small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+
+/* ── Toggle Switch ────────────────────────────────────────────────── */
+.ap-toggle {
+  width: 42px; height: 22px; border-radius: 11px; border: none;
+  background: #d1d5db; cursor: pointer; position: relative; transition: background 0.2s;
+  padding: 0;
+}
+.ap-toggle[data-active="true"] { background: var(--green); }
+.ap-toggle span {
+  display: block; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  position: absolute; top: 3px; left: 3px; transition: left 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.ap-toggle[data-active="true"] span { left: 23px; }
+
+/* ── Action Buttons ───────────────────────────────────────────────── */
+.ap-action-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 10px; border-radius: 6px; border: 1px solid;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.ap-action-btn svg { width: 12px; height: 12px; }
+.ap-action-btn--green { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.ap-action-btn--green:hover { background: #dcfce7; }
+.ap-action-btn--gold { border-color: #fde68a; background: #fefce8; color: #92400e; }
+.ap-action-btn--gold:hover { background: #fef3c7; }
+.ap-action-btn--blue { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+.ap-action-btn--blue:hover { background: #dbeafe; }
+.ap-action-btn--red { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+.ap-action-btn--red:hover { background: #fee2e2; }
+
+/* ── Modals ────────────────────────────────────────────────────────── */
+.ap-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; padding: 16px; backdrop-filter: blur(2px);
+}
+.ap-modal {
+  background: var(--panel); border-radius: 16px; padding: 28px;
+  width: min(440px, 100%); max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+.ap-modal--wide { width: min(540px, 100%); }
+.ap-modal--xl { width: min(800px, 100%); }
+.ap-modal__head { margin-bottom: 20px; }
+.ap-modal__head h3 { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
+.ap-modal__head small { color: var(--muted); font-size: 12px; }
+.ap-modal__actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+/* ── Permission Cards ─────────────────────────────────────────────── */
+.ap-perm-card {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px; border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; transition: all 0.15s;
+}
+.ap-perm-card:hover { border-color: #c7cbd8; }
+.ap-perm-card--active { border-color: var(--gold); background: #fffbeb; }
+.ap-perm-card input { margin-top: 3px; width: 16px; height: 16px; }
+.ap-perm-card strong { display: block; font-size: 13px; }
+.ap-perm-card small { color: var(--muted); font-size: 11px; }
+
+/* ── Wallet Banner ────────────────────────────────────────────────── */
+.ap-wallet-banner {
+  padding: 20px; border-radius: 12px; color: #fff;
+  background: linear-gradient(135deg, #059669, #10b981);
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-bottom: 18px;
+}
+.ap-wallet-banner small { opacity: 0.8; font-size: 10px; letter-spacing: 0.1em; font-weight: 600; }
+.ap-wallet-banner strong { display: block; font-size: 32px; margin-top: 4px; }
+.ap-wallet-banner b { font-size: 14px; opacity: 0.7; }
+.ap-wallet-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; margin-bottom: 16px; }
+
+/* ── Deposit / Transaction Rows ───────────────────────────────────── */
+.ap-deposit-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px;
+}
+.ap-deposit-row strong { font-size: 13px; }
+.ap-deposit-row small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+.ap-tx-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 14px;
+  align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f1f5;
+}
+.ap-tx-row:last-child { border-bottom: none; }
+.ap-tx-row strong { font-size: 12px; }
+.ap-tx-row small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+.ap-tx-row b { font-size: 13px; }
+.ap-tx-row span { font-size: 11px; }
+
+/* ── Section Title ────────────────────────────────────────────────── */
+.ap-section-title { margin: 20px 0 10px; font-size: 13px; font-weight: 700; color: var(--text); }
+
+/* ── Messages ─────────────────────────────────────────────────────── */
+.ap-msg--ok { color: #059669; font-size: 13px; margin: 12px 0 0; }
+.ap-msg--err { color: #dc2626; font-size: 13px; margin: 12px 0 0; }
+.ap-error--ok { background: #f0fdf4; color: #059669; border-color: #bbf7d0; }
+
+/* ── Status Pending ───────────────────────────────────────────────── */
+.ap-status--pending { background: #fef3c7; color: #d97706; }
+
 /* ── Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .ap-shell { flex-direction: column; }
