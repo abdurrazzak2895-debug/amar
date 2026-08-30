@@ -224,10 +224,13 @@ export default function T2HubLivePage() {
   const availableDates = useMemo(() => {
     if (result?.type !== "available-dates") return [];
     const raw = result.data;
-    if (Array.isArray(raw)) return raw.map((d: any) => typeof d === "string" ? d : d.date || d.exam_date || "").filter(Boolean);
-    if (raw?.dates && Array.isArray(raw.dates)) return raw.dates.map((d: any) => typeof d === "string" ? d : d.date || d.exam_date || "").filter(Boolean);
-    if (raw?.data && Array.isArray(raw.data)) return raw.data.map((d: any) => typeof d === "string" ? d : d.date || d.exam_date || "").filter(Boolean);
-    return [];
+    const list = raw?.available_dates || raw?.dates || raw?.data || (Array.isArray(raw) ? raw : []);
+    const set = new Set<string>();
+    list.forEach((d: any) => {
+      const date = typeof d === "string" ? d : d?.start_date_in_browser_time_zone || d?.date || d?.exam_date || "";
+      if (date) set.add(date);
+    });
+    return [...set].sort();
   }, [result]);
 
   return (
