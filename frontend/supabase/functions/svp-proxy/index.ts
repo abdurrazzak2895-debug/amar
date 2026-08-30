@@ -1267,15 +1267,37 @@ Deno.serve(async (req) => {
       if (testCenterId === undefined || testCenterId === null || testCenterId === "") {
         throw { statusCode: 400, message: "Missing test_center_id" };
       }
-      const data = await svpFetch("/api/v1/individual_labor_space/temporary_seats", {
-        method: "POST",
-        token: svpToken,
-        body: {
-          exam_session_id: examSessionId,
-          test_center_id: testCenterId,
-        },
-      });
-      return json(data);
+      try {
+        const data = await svpFetch("/api/v1/individual_labor_space/temporary_seats", {
+          method: "POST",
+          token: svpToken,
+          body: {
+            exam_session_id: examSessionId,
+            test_center_id: testCenterId,
+          },
+        });
+        return json(data);
+      } catch (holdErr: any) {
+        const msg = String(holdErr?.message || holdErr?.error || "").toLowerCase();
+        if (msg.includes("already been taken") || msg.includes("already taken")) {
+          const reservations: any = await svpFetch("/api/v1/individual_labor_space/exam_reservations?locale=en", {
+            method: "GET",
+            token: svpToken,
+          });
+          const rows = Array.isArray(reservations) ? reservations
+            : Array.isArray(reservations?.exam_reservations) ? reservations.exam_reservations
+              : Array.isArray(reservations?.data?.exam_reservations) ? reservations.data.exam_reservations
+                : [];
+          const match = rows.find((r: any) => {
+            const rSid = String(r?.exam_session_id || r?.exam_session?.id || "");
+            const st = String(r?.status || r?.state || "").toLowerCase();
+            return rSid === String(examSessionId) && (st.includes("hold") || st.includes("pending") || st === "");
+          });
+          if (match) return json(match);
+          throw { statusCode: 409, code: "CANDIDATE_LABOR_ID_EXISTS", message: "Session already held but no active reservation found" };
+        }
+        throw holdErr;
+      }
     }
 
     // ΓöÇΓöÇ Standard routes ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
