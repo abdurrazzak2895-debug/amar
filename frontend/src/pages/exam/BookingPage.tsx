@@ -605,29 +605,20 @@ export default function BookingPage() {
       try {
         const params = new URLSearchParams({
           category_id: String(categoryId),
-          city: selectedCity || "",
         });
         const data = await api(`/t2hub/exam-available-dates?${params.toString()}`);
         if (!active) return;
         const rawDates = data?.available_dates || data?.dates || data?.data || (Array.isArray(data) ? data : []);
-        const dateSet = new Set<string>();
-        const citySet = new Set<string>();
-        rawDates.forEach((d: any) => {
-          const dateStr = d?.start_date_in_browser_time_zone || d?.start_date_in_tc_time_zone || d?.date || d?.exam_date || (typeof d === "string" ? d : "");
-          const city = d?.test_center?.city || d?.city || d?.test_center?.test_center_city || "";
-          if (dateStr) dateSet.add(dateStr);
-          if (city) citySet.add(city);
-        });
-        const entries = [...dateSet].sort().map((date) => ({ city: [...citySet][0] || selectedCity || "", date }));
-        const cities = [...citySet].sort();
-        setLiveCityOptions(cities.length ? cities : [selectedCity].filter(Boolean));
+        const entries = normalizeAvailableDateEntries(rawDates);
+        const cities = [...new Set(entries.map((e) => e.city).filter(Boolean))].sort();
+        setLiveCityOptions(cities);
         setAvailableDateEntries(entries);
         setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || prev || ""));
       } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(isT2HubSessionMissing(err) ? T2HUB_SESSION_MISSING_MESSAGE : (err?.message || "Failed to load available dates")); }
       finally { if (active) setLoadingDates(false); }
     })();
     return () => { active = false; };
-  }, [selectedOccupationId, categoryId, selectedCity]);
+  }, [selectedOccupationId, categoryId]);
 
   useEffect(() => {
     setAvailableDate((prev) => (prev && availableDates.includes(prev) ? prev : availableDates[0] || ""));
