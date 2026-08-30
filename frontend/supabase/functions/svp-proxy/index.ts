@@ -1021,10 +1021,8 @@ Deno.serve(async (req) => {
         throw { statusCode: 400, message: "Missing city, category_id, or exam_date" };
       }
 
-      const [centersData, sessionsData] = await Promise.all([
-        t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req),
-        t2hubFetch(t2hubQuery("/exam-sessions-bulk", params), req),
-      ]);
+      const centersData = await t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req);
+      const sessionsData = await t2hubFetch(t2hubQuery("/pacc-exam-sessions", params), req);
       const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
       const centerByName = new Map(
         centers.map((center: any) => [String(center?.name || "").trim().toLowerCase(), center])
