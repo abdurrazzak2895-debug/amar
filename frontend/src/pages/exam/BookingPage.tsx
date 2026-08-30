@@ -710,103 +710,72 @@ export default function BookingPage() {
     return () => { active = false; };
   }, [selectedCity]);
 
-  // The available-dates endpoint is city-level. Before the user chooses a
-  // centre, check every real centre for the selected date and retain only
-  // centres with a positive official SVP session count.
+  // When a date is selected, fetch ALL sessions for that date in one call.
+  // Centers are derived from the response — only centers with sessions appear.
   useEffect(() => {
     let active = true;
     (async () => {
       if (!selectedCity || !availableDate || !categoryId) {
         setDateScopedCenters(null);
         setLoadingCenterAvailability(false);
+        setSessions([]);
         return;
       }
       setLoadingCenterAvailability(true);
+      setSessions([]);
+      setError("");
       try {
-        // Reuse the already-fetched cityCenterOptions to avoid a duplicate
-        // test-centers API call. Only do the per-center session check.
-        let centersToCheck = cityCenterOptions;
-        if (!centersToCheck.length) {
-          const centerPayload: any = await api(`/t2hub/test-centers?${new URLSearchParams({
-            city: String(selectedCity),
-          }).toString()}`);
-          const rawCenters = Array.isArray(centerPayload?.sites)
-            ? centerPayload.sites
-            : Array.isArray(centerPayload?.test_centers)
-              ? centerPayload.test_centers
-              : pickArray(centerPayload);
-          centersToCheck = mergeVerifiedCityCenterRoster(rawCenters, selectedCity, "78").map((c: any) => ({
-            siteId: String(c.test_center_id ?? c.id ?? c.site_id ?? ""),
-            name: String(c.test_center_name ?? c.name ?? c.title ?? "").trim(),
-            city: String(c.city ?? c.test_center_city ?? selectedCity).trim(),
-          })).filter((c: any) => c.siteId && c.name);
-        }
-        const rawCenters: any[] = await Promise.all(centersToCheck.map(async (center: any) => {
-          const siteId = String(center.siteId ?? center.test_center_id ?? center.id ?? center.site_id ?? "");
-          if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
-          try {
-            const sessionPayload: any = await api(`/t2hub/pacc-exam-sessions?${new URLSearchParams({
-              category_id: String(categoryId),
-              city: String(selectedCity),
-              exam_date: availableDate,
-              test_center_id: siteId,
-            }).toString()}`);
-            const liveSessions = Array.isArray(sessionPayload?.sessions) ? sessionPayload.sessions : pickArray(sessionPayload);
-            return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
-          } catch {
-            return { ...center, session_count: 0, lookup_status: "error" };
-          }
-        }));
-
+        const data: any = await api(`/t2hub/pacc-exam-sessions?${new URLSearchParams({
+          category_id: String(categoryId),
+          city: String(selectedCity),
+          exam_date: availableDate,
+        }).toString()}`);
         if (!active) return;
-        const normalized = rawCenters.map((center: any) => ({
-          siteId: String(center.siteId ?? center.test_center_id ?? center.id ?? center.site_id ?? ""),
-          name: String(center.name ?? center.test_center_name ?? center.title ?? "").trim(),
-          city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
-          sessionCount: Number(center.session_count ?? 0),
-        })).filter((center: any) => center.siteId && center.name);
+        const allSessions = Array.isArray(data?.sessions) ? data.sessions : pickArray(data);
+        setSessions(allSessions);
+
+        const centerMap = new Map<string, { siteId: string; name: string; city: string; sessionCount: number }>();
+        allSessions.forEach((s: any) => {
+          const siteId = String(s?.site_id || s?.test_center?.site_id || s?.test_center?.id || s?.test_center_id || s?.test_center?.test_center_id || "").trim();
+          if (!siteId) return;
+          const name = String(s?.test_center_name || s?.test_center?.name || s?.test_center?.test_center_name || `Center #${siteId}`).trim();
+          const city = String(s?.site_city || s?.test_center?.city || s?.test_center?.test_center_city || selectedCity).trim();
+          const existing = centerMap.get(siteId);
+          if (existing) {
+            existing.sessionCount++;
+          } else {
+            centerMap.set(siteId, { siteId, name, city, sessionCount: 1 });
+          }
+        });
+        const normalized = Array.from(centerMap.values()).sort((a, b) => b.sessionCount - a.sessionCount);
         setDateScopedCenters(normalized);
+        setSelectedCenterId("");
+        setSessionId("");
+        setSiteId("");
+        setSiteCity(selectedCity);
+        setHoldId("");
+        setHoldExpiresAt("");
+        setReservationId("");
+        setPaymentSession(null);
       } catch (err: any) {
         if (!active) return;
         setDateScopedCenters([]);
-        setError(err?.message || "Failed to check centre availability for the selected date");
+        setSessions([]);
+        setError(err?.message || "Failed to load exam sessions for the selected date");
       } finally {
         if (active) setLoadingCenterAvailability(false);
       }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId, cityCenterOptions]);
+  }, [selectedCity, availableDate, categoryId]);
 
-  // Sessions are always requested with the exact selected center ID. This is
-  // the key protection against mixing several centers in one city.
+  // Sessions are already loaded by the date effect above. When the user picks
+  // a center, filter the existing sessions locally — no extra API call needed.
   useEffect(() => {
-    let active = true;
-    const retryNotice = sessionRetryNotice;
-    (async () => {
-      if (!selectedCity || !availableDate || !categoryId || !selectedCenterId) { setSessions([]); return; }
-      setLoadingSessions(true);
-      if (!retryNotice) setError("");
-      try {
-        const params = new URLSearchParams({
-          category_id: String(categoryId),
-          city: String(selectedCity),
-          exam_date: availableDate,
-          test_center_id: String(selectedCenterId),
-        });
-        const data: any = await api(`/t2hub/pacc-exam-sessions?${params.toString()}`);
-        if (!active) return;
-        const liveSessions = Array.isArray(data?.sessions) ? data.sessions : pickArray(data);
-        setSessions(filterSessionsForCenter(liveSessions, selectedCenterId));
-        setSessionRetryNotice("");
-      } catch (err: any) {
-        if (!active) return;
-        setSessions([]);
-        if (!retryNotice) setError(err?.message || "Failed to load center-specific exam sessions");
-      }
-      finally { if (active) setLoadingSessions(false); }
-    })();
-    return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId, selectedCenterId, sessionReloadKey]);
+    if (!selectedCenterId || !sessions.length) return;
+    const centerSessions = filterSessionsForCenter(sessions, selectedCenterId);
+    setSessions(centerSessions);
+  }, [selectedCenterId]);
 
   // Legacy local center mappings are intentionally not used for the live SVP
   // selection path. The live proxy enriches every center-scoped session with
