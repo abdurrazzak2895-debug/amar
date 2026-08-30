@@ -301,7 +301,6 @@ export default function T2HubLivePage() {
             <button className="tk-btn tk-btn--gold" onClick={fetchPaccSessions} disabled={loading}><Zap size={14} /> Find Sessions</button>
             <button className="tk-btn" onClick={fetchTestCenters} disabled={loading}><MapPin size={14} /> All Centers</button>
             <button className="tk-btn" onClick={fetchOccupations} disabled={loading}><Search size={14} /> Occupations</button>
-            <button className="tk-btn" onClick={fetchSessionStatus} disabled={loading}><RefreshCw size={14} /> Health</button>
           </div>
         </section>
 
