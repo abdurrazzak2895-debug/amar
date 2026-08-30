@@ -303,9 +303,37 @@ async function fetchT2HubSessionPage(appPath: string) {
   return { res, html, keyRaw: extractT2HubKey(html) };
 }
 
+/**
+ * Build a t2hub session from the T2HUB_SESSION_KEY and T2HUB_SESSION_COOKIE
+ * environment variables. These are set by the refresh-t2hub-session script
+ * after a successful Playwright login and capture.
+ */
+function getEnvSession(): NonNullable<typeof t2hubSession> | null {
+  const keyRaw = Deno.env.get("T2HUB_SESSION_KEY") || "";
+  const cookie = Deno.env.get("T2HUB_SESSION_COOKIE") || "";
+  if (!keyRaw || !cookie) return null;
+  return {
+    keyRaw,
+    cookie,
+    csrfToken: Deno.env.get("T2HUB_SESSION_CSRF") || "",
+    appPath: T2HUB_APP_PATH,
+    expiresAt: Date.now() + 30 * 60 * 1000,
+  };
+}
+
 async function getT2HubSession() {
   if (t2hubSession && t2hubSession.expiresAt > Date.now()) return t2hubSession;
 
+  // 1. Try caller-provided headers (already handled in t2hubFetch/t2hubPost)
+  // 2. Try in-memory cache
+  // 3. Try env var session (set by refresh script)
+  const envSession = getEnvSession();
+  if (envSession) {
+    t2hubSession = envSession;
+    return t2hubSession;
+  }
+
+  // 4. Try fetching landing page (works only if the page exposes __sk)
   const appPaths = [T2HUB_APP_PATH, `${T2HUB_APP_PATH}/`, `${T2HUB_APP_PATH}/agent/login`];
   let lastStatus = 0;
   for (const appPath of appPaths) {
@@ -326,7 +354,7 @@ async function getT2HubSession() {
   throw {
     statusCode: 503,
     code: T2HUB_SESSION_MISSING_CODE,
-    message: "t2hub session has not been provided. The booking page requires a one-time t2hub login to capture the caller's session cookies and AES key before it can load t2hub-backed data.",
+    message: "t2hub session has not been provided. Run the refresh-t2hub-session script or pass x-t2hub-cookie + x-t2hub-key headers.",
     details: { status: lastStatus || undefined },
   };
 }
