@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { MapPin, CalendarDays, RefreshCw, Search, Building2, Users, Armchair, CircleCheck, CircleX, ChevronRight, Zap } from "lucide-react";
+import { useCallback, useState, useMemo } from "react";
+import { MapPin, CalendarDays, RefreshCw, Search, Building2, Users, Armchair, CircleCheck, CircleX, ChevronRight, Zap, Filter } from "lucide-react";
 import "@/styles/takamol.css";
 
 const DIVISIONS = ["Dhaka", "Chattogram", "Rajshahi", "Khulna", "Barishal", "Rangpur", "Mymensingh", "Sylhet"];
@@ -43,6 +43,84 @@ function seatBadge(n: number) {
     color: seatColor(n),
     border: `1px solid ${seatColor(n)}44`,
   };
+}
+
+function OccupationsList({ data }: { data: any }) {
+  const [search, setSearch] = useState("");
+  const occupations = useMemo(() => {
+    const raw = data?.occupations || (Array.isArray(data) ? data : []);
+    if (!search.trim()) return raw;
+    const q = search.toLowerCase();
+    return raw.filter((o: any) =>
+      String(o.english_name || o.name || "").toLowerCase().includes(q) ||
+      String(o.category_name || "").toLowerCase().includes(q) ||
+      String(o.occupation_key || "").includes(q)
+    );
+  }, [data, search]);
+
+  const totalCount = data?.occupations?.length || data?.count || (Array.isArray(data) ? data.length : 0);
+  const grouped = useMemo(() => {
+    const map = new Map<string, any[]>();
+    occupations.forEach((o: any) => {
+      const cat = o.category_name || "Uncategorized";
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(o);
+    });
+    return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [occupations]);
+
+  return (
+    <section className="tk-card tk-booking-card" style={{ border: "1px solid var(--tk-glass-border)" }}>
+      <div className="tk-step-heading" style={{ marginBottom: 12 }}>
+        <span>02</span>
+        <div><p className="tk-eyebrow">RESULT</p><strong>{occupations.length} / {totalCount} Occupations</strong></div>
+      </div>
+
+      <div className="tk-field" style={{ marginBottom: 16 }}>
+        <label><Filter size={13} /> Search occupations</label>
+        <input
+          type="text"
+          placeholder="Search by name, category, or code..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
+        {grouped.map(([cat, items]) => (
+          <div key={cat} style={{
+            border: "1px solid var(--tk-glass-border)",
+            borderRadius: 10,
+            overflow: "hidden",
+          }}>
+            <div style={{
+              padding: "8px 14px",
+              background: "rgba(255,255,255,0.03)",
+              borderBottom: "1px solid var(--tk-glass-border)",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontWeight: 700, fontSize: 12 }}>{cat}</span>
+              <span style={{ fontSize: 11, color: "var(--tk-muted)" }}>{items.length}</span>
+            </div>
+            <div style={{ padding: "4px 0" }}>
+              {items.map((o: any, i: number) => (
+                <div key={o.id || i} style={{
+                  padding: "5px 14px",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  fontSize: 12,
+                  borderBottom: i < items.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none",
+                }}>
+                  <span>{o.english_name || o.name}</span>
+                  <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--tk-muted)", flexShrink: 0, marginLeft: 8 }}>{o.occupation_key || o.id}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export default function T2HubLivePage() {
@@ -351,32 +429,7 @@ export default function T2HubLivePage() {
 
         {/* ── Occupations ── */}
         {result?.type === "occupations" && !loading && (
-          <section className="tk-card tk-booking-card" style={{ border: "1px solid var(--tk-glass-border)" }}>
-            <div className="tk-step-heading" style={{ marginBottom: 12 }}>
-              <span>02</span>
-              <div><p className="tk-eyebrow">RESULT</p><strong>{Array.isArray(result.data) ? result.data.length : 0} Occupations</strong></div>
-            </div>
-            {Array.isArray(result.data) && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8, fontSize: 13 }}>
-                {result.data.slice(0, 60).map((occ: any) => (
-                  <div key={occ.id} style={{
-                    padding: "8px 14px",
-                    border: "1px solid var(--tk-glass-border)",
-                    borderRadius: 8,
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                  }}>
-                    <span>{occ.name || occ.english_name}</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--tk-muted)" }}>{occ.occupation_key || occ.id}</span>
-                  </div>
-                ))}
-                {result.data.length > 60 && (
-                  <p style={{ gridColumn: "1/-1", color: "var(--tk-muted)", fontSize: 12, padding: "4px 14px" }}>
-                    + {result.data.length - 60} more (see raw JSON)
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
+          <OccupationsList data={result.data} />
         )}
 
         {/* ── Raw JSON ── */}
