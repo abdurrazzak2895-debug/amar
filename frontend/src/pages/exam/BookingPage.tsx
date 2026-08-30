@@ -95,8 +95,8 @@ export default function BookingPage() {
     [sessions, selectedCity]
   );
   const sessionsWithResolvedCenters = useMemo(
-    () => cityFilteredSessions.map((item) => resolveSessionCenter(item, new Map(), new Map(), new Map(), [])),
-    [cityFilteredSessions]
+    () => cityFilteredSessions.map((item) => resolveSessionCenter(item, testCenterMap, centerNameToSiteId, sessionIdToSiteId, sectionRules)),
+    [cityFilteredSessions, testCenterMap, centerNameToSiteId, sessionIdToSiteId, sectionRules]
   );
   const centerOptions = useMemo(() => {
     const live = cityCenterOptions
@@ -727,25 +727,27 @@ export default function BookingPage() {
       }
       setLoadingCenterAvailability(true);
       try {
-        // Use the official centre-scoped session route directly. The optimized
-        // `/center-session-availability` route is optional server-side code and
-        // may not be deployed with the frontend; a missing route must never be
-        // interpreted as zero availability. Each centre is therefore checked
-        // independently through the already-live `/exam-sessions` contract.
-        // Load the complete city centre roster first; occupation category is
-        // applied only when checking each centre's date-scoped sessions.
-        const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
-          city: String(selectedCity),
-          country_id: "78",
-        }).toString()}`);
-        const centers = Array.isArray(centerPayload?.test_centers)
-          ? centerPayload.test_centers
-          : Array.isArray(centerPayload?.centers)
-            ? centerPayload.centers
-            : pickArray(centerPayload);
-        const verifiedCenters = mergeVerifiedCityCenterRoster(centers, selectedCity, "78");
-        const rawCenters: any[] = await Promise.all(verifiedCenters.map(async (center: any) => {
-          const siteId = String(center.test_center_id ?? center.id ?? center.site_id ?? "");
+        // Reuse the already-fetched cityCenterOptions to avoid a duplicate
+        // test-centers API call. Only do the per-center session check.
+        let centersToCheck = cityCenterOptions;
+        if (!centersToCheck.length) {
+          const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
+            city: String(selectedCity),
+            country_id: "78",
+          }).toString()}`);
+          const rawCenters = Array.isArray(centerPayload?.test_centers)
+            ? centerPayload.test_centers
+            : Array.isArray(centerPayload?.centers)
+              ? centerPayload.centers
+              : pickArray(centerPayload);
+          centersToCheck = mergeVerifiedCityCenterRoster(rawCenters, selectedCity, "78").map((c: any) => ({
+            siteId: String(c.test_center_id ?? c.id ?? c.site_id ?? ""),
+            name: String(c.test_center_name ?? c.name ?? c.title ?? "").trim(),
+            city: String(c.city ?? c.test_center_city ?? selectedCity).trim(),
+          })).filter((c: any) => c.siteId && c.name);
+        }
+        const rawCenters: any[] = await Promise.all(centersToCheck.map(async (center: any) => {
+          const siteId = String(center.siteId ?? center.test_center_id ?? center.id ?? center.site_id ?? "");
           if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
           try {
             const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
@@ -765,15 +767,14 @@ export default function BookingPage() {
 
         if (!active) return;
         const normalized = rawCenters.map((center: any) => ({
-          siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
-          name: String(center.test_center_name ?? center.name ?? center.title ?? "").trim(),
+          siteId: String(center.siteId ?? center.test_center_id ?? center.id ?? center.site_id ?? ""),
+          name: String(center.name ?? center.test_center_name ?? center.title ?? "").trim(),
           city: String(center.city ?? center.test_center_city ?? selectedCity).trim(),
           sessionCount: Number(center.session_count ?? 0),
         })).filter((center: any) => center.siteId && center.name);
         setDateScopedCenters(normalized);
       } catch (err: any) {
         if (!active) return;
-        // Do not offer unverified centres after both lookup paths fail.
         setDateScopedCenters([]);
         setError(err?.message || "Failed to check centre availability for the selected date");
       } finally {
@@ -781,7 +782,7 @@ export default function BookingPage() {
       }
     })();
     return () => { active = false; };
-  }, [selectedCity, availableDate, categoryId]);
+  }, [selectedCity, availableDate, categoryId, cityCenterOptions]);
 
   // Sessions are always requested with the exact selected center ID. This is
   // the key protection against mixing several centers in one city.
