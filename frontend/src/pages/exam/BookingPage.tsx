@@ -30,6 +30,7 @@ export default function BookingPage() {
   const [availableDateEntries, setAvailableDateEntries] = useState<{ city: string; date: string }[]>([]);
   const [liveCityOptions, setLiveCityOptions] = useState<string[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [allDateSessions, setAllDateSessions] = useState<any[]>([]);
   const [testCenterMap, setTestCenterMap] = useState<Map<string, string>>(new Map());
   // name (lowercased) -> site_id, resolved from local DB so we can stamp site_id
   // on sessions when SVP returns site_id=null.
@@ -719,6 +720,7 @@ export default function BookingPage() {
         setDateScopedCenters(null);
         setLoadingCenterAvailability(false);
         setSessions([]);
+        setAllDateSessions([]);
         return;
       }
       setLoadingCenterAvailability(true);
@@ -732,6 +734,7 @@ export default function BookingPage() {
         }).toString()}`);
         if (!active) return;
         const allSessions = Array.isArray(data?.sessions) ? data.sessions : pickArray(data);
+        setAllDateSessions(allSessions);
         setSessions(allSessions);
 
         const centerMap = new Map<string, { siteId: string; name: string; city: string; sessionCount: number }>();
@@ -761,6 +764,7 @@ export default function BookingPage() {
         if (!active) return;
         setDateScopedCenters([]);
         setSessions([]);
+        setAllDateSessions([]);
         setError(err?.message || "Failed to load exam sessions for the selected date");
       } finally {
         if (active) setLoadingCenterAvailability(false);
@@ -772,9 +776,8 @@ export default function BookingPage() {
   // Sessions are already loaded by the date effect above. When the user picks
   // a center, filter the existing sessions locally — no extra API call needed.
   useEffect(() => {
-    if (!selectedCenterId || !sessions.length) return;
-    const centerSessions = filterSessionsForCenter(sessions, selectedCenterId);
-    setSessions(centerSessions);
+    if (!selectedCenterId || !allDateSessions.length) return;
+    setSessions(filterSessionsForCenter(allDateSessions, selectedCenterId));
   }, [selectedCenterId]);
 
   // Legacy local center mappings are intentionally not used for the live SVP
