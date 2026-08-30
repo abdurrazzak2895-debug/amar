@@ -535,20 +535,10 @@ export default function BookingPage() {
     (async () => {
       setLoadingOccupations(true); setError("");
       try {
-        const perPage = 200;
-        const all: any[] = [];
-        let page = 1;
-        // Fetch all pages until we get an empty/short page (max 50 pages safety)
-        for (; page <= 50; page++) {
-          const data = await api(`/occupations?locale=en&per_page=${perPage}&page=${page}`);
-          const arr = pickArray(data);
-          if (!arr.length) break;
-          all.push(...arr);
-          if (arr.length < perPage) break;
-        }
-        // Dedupe by id
+        const data = await api(`/t2hub/occupations?per_page=1000&locale=en`);
+        const arr = pickArray(data);
         const seen = new Set<string>();
-        const unique = all.filter((it) => {
+        const unique = arr.filter((it: any) => {
           const k = String(it?.id ?? "");
           if (!k || seen.has(k)) return false;
           seen.add(k);
