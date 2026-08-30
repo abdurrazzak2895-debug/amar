@@ -604,17 +604,25 @@ export default function BookingPage() {
       setLoadingDates(true); setError("");
       try {
         const params = new URLSearchParams({
-          per_page: "1000", category_id: String(categoryId),
-          start_at_date_from: normalizeDateValue(new Date().toISOString()),
-          available_seats: "greater_than::0", status: "scheduled", locale: "en",
+          category_id: String(categoryId),
+          city: selectedCity || "",
         });
-        const data = await api(`/available-dates?${params.toString()}`);
+        const data = await api(`/t2hub/exam-available-dates?${params.toString()}`);
         if (!active) return;
-        const entries = normalizeAvailableDateEntries(pickArray(data));
-        const cities = buildCityOptions(entries);
-        setLiveCityOptions(cities);
+        const rawDates = data?.available_dates || data?.dates || data?.data || (Array.isArray(data) ? data : []);
+        const dateSet = new Set<string>();
+        const citySet = new Set<string>();
+        rawDates.forEach((d: any) => {
+          const dateStr = d?.start_date_in_browser_time_zone || d?.start_date_in_tc_time_zone || d?.date || d?.exam_date || (typeof d === "string" ? d : "");
+          const city = d?.test_center?.city || d?.city || "";
+          if (dateStr) dateSet.add(dateStr);
+          if (city) citySet.add(city);
+        });
+        const entries = [...dateSet].sort().map((date) => ({ city: [...citySet][0] || selectedCity || "", date }));
+        const cities = [...citySet].sort();
+        setLiveCityOptions(cities.length ? cities : [selectedCity].filter(Boolean));
         setAvailableDateEntries(entries);
-        setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || ""));
+        setSelectedCity((prev) => (prev && cities.includes(prev) ? prev : cities[0] || prev || ""));
       } catch (err: any) { if (!active) return; setAvailableDateEntries([]); setError(isT2HubSessionMissing(err) ? T2HUB_SESSION_MISSING_MESSAGE : (err?.message || "Failed to load available dates")); }
       finally { if (active) setLoadingDates(false); }
     })();
@@ -691,13 +699,10 @@ export default function BookingPage() {
     (async () => {
       if (!selectedCity) { setCityCenterOptions([]); return; }
       try {
-        // The centre roster is city/country scoped, not occupation scoped.
-        // Category filtering belongs to the exam-session availability query;
-        // including category_id here incorrectly hides valid city centres.
-        const params = new URLSearchParams({ city: String(selectedCity), country_id: "78" });
-        const data: any = await api(`/test-centers?${params.toString()}`);
+        const params = new URLSearchParams({ city: String(selectedCity) });
+        const data: any = await api(`/t2hub/test-centers?${params.toString()}`);
         if (!active) return;
-        const rawCenters = Array.isArray(data?.test_centers) ? data.test_centers : pickArray(data);
+        const rawCenters = Array.isArray(data?.sites) ? data.sites : Array.isArray(data?.test_centers) ? data.test_centers : pickArray(data);
         const verifiedCenters = mergeVerifiedCityCenterRoster(rawCenters, selectedCity, "78");
         const normalized = verifiedCenters.map((center: any) => ({
           siteId: String(center.test_center_id ?? center.id ?? center.site_id ?? ""),
@@ -731,14 +736,13 @@ export default function BookingPage() {
         // test-centers API call. Only do the per-center session check.
         let centersToCheck = cityCenterOptions;
         if (!centersToCheck.length) {
-          const centerPayload: any = await api(`/test-centers?${new URLSearchParams({
+          const centerPayload: any = await api(`/t2hub/test-centers?${new URLSearchParams({
             city: String(selectedCity),
-            country_id: "78",
           }).toString()}`);
-          const rawCenters = Array.isArray(centerPayload?.test_centers)
-            ? centerPayload.test_centers
-            : Array.isArray(centerPayload?.centers)
-              ? centerPayload.centers
+          const rawCenters = Array.isArray(centerPayload?.sites)
+            ? centerPayload.sites
+            : Array.isArray(centerPayload?.test_centers)
+              ? centerPayload.test_centers
               : pickArray(centerPayload);
           centersToCheck = mergeVerifiedCityCenterRoster(rawCenters, selectedCity, "78").map((c: any) => ({
             siteId: String(c.test_center_id ?? c.id ?? c.site_id ?? ""),
@@ -750,15 +754,13 @@ export default function BookingPage() {
           const siteId = String(center.siteId ?? center.test_center_id ?? center.id ?? center.site_id ?? "");
           if (!siteId) return { ...center, session_count: 0, lookup_status: "error" };
           try {
-            const sessionPayload: any = await api(`/exam-sessions?${new URLSearchParams({
+            const sessionPayload: any = await api(`/t2hub/pacc-exam-sessions?${new URLSearchParams({
               category_id: String(categoryId),
               city: String(selectedCity),
               exam_date: availableDate,
               test_center_id: siteId,
-              country_id: "78",
-              available_seats: "greater_than::0",
             }).toString()}`);
-            const liveSessions = Array.isArray(sessionPayload?.exam_sessions) ? sessionPayload.exam_sessions : pickArray(sessionPayload);
+            const liveSessions = Array.isArray(sessionPayload?.sessions) ? sessionPayload.sessions : pickArray(sessionPayload);
             return { ...center, session_count: liveSessions.length, lookup_status: "ok" };
           } catch {
             return { ...center, session_count: 0, lookup_status: "error" };
@@ -800,9 +802,9 @@ export default function BookingPage() {
           exam_date: availableDate,
           test_center_id: String(selectedCenterId),
         });
-        const data: any = await api(`/exam-sessions?${params.toString()}`);
+        const data: any = await api(`/t2hub/pacc-exam-sessions?${params.toString()}`);
         if (!active) return;
-        const liveSessions = Array.isArray(data?.exam_sessions) ? data.exam_sessions : pickArray(data);
+        const liveSessions = Array.isArray(data?.sessions) ? data.sessions : pickArray(data);
         setSessions(filterSessionsForCenter(liveSessions, selectedCenterId));
         setSessionRetryNotice("");
       } catch (err: any) {
