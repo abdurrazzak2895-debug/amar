@@ -837,6 +837,62 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ═══ t2hub data routes (no SVP auth required — uses t2hub session only) ═══
+    if (req.method === "GET" && path === "/t2hub/test-centers") {
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      const city = params.get("city") || params.get("division") || "";
+      if (!city) throw { statusCode: 400, message: "Missing city or division" };
+      params.delete("city");
+      params.set("division", city);
+      const data = await t2hubFetch(t2hubQuery("/test-centers", params), req);
+      return json(data);
+    }
+
+    if (req.method === "GET" && path === "/t2hub/occupations") {
+      return json(await t2hubFetch(t2hubQuery("/pacc/occupations", new URLSearchParams(query)), req));
+    }
+
+    if (req.method === "GET" && path === "/t2hub/exam-available-dates") {
+      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", new URLSearchParams(query)), req));
+    }
+
+    if (req.method === "GET" && path === "/t2hub/exam-sessions-bulk") {
+      return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query)), req));
+    }
+
+    if (req.method === "POST" && path === "/t2hub/exam-sessions-bulk") {
+      const body = await req.json().catch(() => ({}));
+      const requests = body?.requests;
+      if (!Array.isArray(requests) || !requests.length) {
+        throw { statusCode: 400, message: "Missing requests array" };
+      }
+      const data = await t2hubPost(`${T2HUB_APP_PATH}/api/exam-sessions-bulk`, { requests }, req);
+      return json(data);
+    }
+
+    if (req.method === "GET" && path === "/t2hub/pacc-exam-sessions") {
+      const params = new URLSearchParams(query);
+      params.delete("locale");
+      const city = params.get("city") || "";
+      const categoryId = params.get("category_id") || "";
+      const examDate = params.get("exam_date") || "";
+      if (!city || !categoryId || !examDate) {
+        throw { statusCode: 400, message: "Missing city, category_id, or exam_date" };
+      }
+
+      const centersData = await t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req);
+      const sessionsData = await t2hubFetch(t2hubQuery("/pacc-exam-sessions", params), req);
+      const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
+      const centerByName = new Map(
+        centers.map((center: any) => [String(center?.name || "").trim().toLowerCase(), center])
+      );
+      const sessions = (Array.isArray(sessionsData?.sessions) ? sessionsData.sessions : [])
+        .map((item: any) => normalizeT2HubSession(item, centerByName));
+
+      return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
+    }
+
     const { user, svpToken } = await requireAuth(req);
 
     // ΓöÇΓöÇ Available dates (with fallbacks) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -968,72 +1024,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ═══ t2hub city test centers ═══
-    if (req.method === "GET" && path === "/t2hub/test-centers") {
-      const params = new URLSearchParams(query);
-      params.delete("locale");
-      // t2hub names this filter `division`, while the booking UI uses `city`.
-      // Convert at the boundary so callers can consistently use `city`.
-      const city = params.get("city") || params.get("division") || "";
-      if (!city) throw { statusCode: 400, message: "Missing city or division" };
-      params.delete("city");
-      params.set("division", city);
-      const data = await t2hubFetch(t2hubQuery("/test-centers", params), req);
-      return json(data);
-    }
-
-    // These routes are intentionally proxied: t2hub responses are encrypted
-    // (`x-encrypted: 1`) and browser callers are subject to cross-origin rules.
-    if (req.method === "GET" && path === "/t2hub/occupations") {
-      return json(await t2hubFetch(t2hubQuery("/pacc/occupations", new URLSearchParams(query)), req));
-    }
-
-    if (req.method === "GET" && path === "/t2hub/exam-available-dates") {
-      return json(await t2hubFetch(t2hubQuery("/exam-available-dates", new URLSearchParams(query)), req));
-    }
-
-    if (req.method === "GET" && path === "/t2hub/exam-sessions-bulk") {
-      return json(await t2hubFetch(t2hubQuery("/exam-sessions-bulk", new URLSearchParams(query)), req));
-    }
-
-    // ΓöÇΓöÇ t2hub bulk exam sessions (CSRF-protected POST) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-    // Batches multiple {category_id, city, exam_date, center_token, center}
-    // lookups into a single request ΓÇö more efficient than repeated single-city
-    // calls to /pacc-exam-sessions when checking several centers/dates at once.
-    if (req.method === "POST" && path === "/t2hub/exam-sessions-bulk") {
-      const body = await req.json().catch(() => ({}));
-      const requests = body?.requests;
-      if (!Array.isArray(requests) || !requests.length) {
-        throw { statusCode: 400, message: "Missing requests array" };
-      }
-      const data = await t2hubPost(`${T2HUB_APP_PATH}/api/exam-sessions-bulk`, { requests }, req);
-      return json(data);
-    }
-
-    // ΓöÇΓöÇ t2hub city-wide PACC sessions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-    if (req.method === "GET" && path === "/t2hub/pacc-exam-sessions") {
-      const params = new URLSearchParams(query);
-      params.delete("locale");
-      const city = params.get("city") || "";
-      const categoryId = params.get("category_id") || "";
-      const examDate = params.get("exam_date") || "";
-      if (!city || !categoryId || !examDate) {
-        throw { statusCode: 400, message: "Missing city, category_id, or exam_date" };
-      }
-
-      const centersData = await t2hubFetch(t2hubQuery("/test-centers", new URLSearchParams({ division: city })), req);
-      const sessionsData = await t2hubFetch(t2hubQuery("/pacc-exam-sessions", params), req);
-      const centers: any[] = Array.isArray(centersData?.sites) ? centersData.sites : [];
-      const centerByName = new Map(
-        centers.map((center: any) => [String(center?.name || "").trim().toLowerCase(), center])
-      );
-      const sessions = (Array.isArray(sessionsData?.sessions) ? sessionsData.sessions : [])
-        .map((item: any) => normalizeT2HubSession(item, centerByName));
-
-      return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
-    }
-
-    // ΓöÇΓöÇ Strict center-scoped live SVP exam sessions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "GET" && path === "/exam-sessions") {
       const params = new URLSearchParams(query);
       const categoryId = params.get("category_id") || "";
