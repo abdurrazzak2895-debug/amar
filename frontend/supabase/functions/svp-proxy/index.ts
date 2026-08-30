@@ -702,11 +702,47 @@ function normalizeCityName(value: unknown): string {
 }
 
 function extractSessionCenterIds(value: any): string[] {
-  const candidates = [value, value?.exam_session, value?.data, value?.data?.exam_session].filter(Boolean);
-  return Array.from(new Set(candidates.map((session: any) => String(
-    session?.test_center_id ?? session?.test_center?.test_center_id ?? session?.test_center?.id ??
-    session?.site_id ?? session?.site?.id ?? ""
-  ).trim()).filter(Boolean)));
+  // Primary: check the well-known paths matching the frontend's getSessionSiteId
+  const candidates = [
+    value,
+    value?.exam_session,
+    value?.data,
+    value?.data?.exam_session,
+  ].filter(Boolean);
+  const ids = candidates.map((session: any) => String(
+    session?.site_id ||
+    session?.test_center_id ||
+    session?.test_center?.site_id ||
+    session?.test_center?.test_center_id ||
+    session?.test_center?.id ||
+    session?.site?.id ||
+    ""
+  ).trim()).filter(Boolean);
+
+  // Fallback: walk the full response tree for deeply nested center IDs
+  if (!ids.length) {
+    const seen = new Set<any>();
+    const queue = [value];
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || typeof node !== "object" || seen.has(node)) continue;
+      seen.add(node);
+      const sid = String(
+        node?.site_id ||
+        node?.test_center_id ||
+        node?.test_center?.site_id ||
+        node?.test_center?.test_center_id ||
+        node?.test_center?.id ||
+        node?.site?.id ||
+        ""
+      ).trim();
+      if (sid) ids.push(sid);
+      if (ids.length) break;
+      queue.push(...(Array.isArray(node) ? node : Object.values(node)));
+    }
+  }
+
+  return Array.from(new Set(ids));
 }
 
 async function assertSvpSessionMatchesCenter(token: string, sessionId: string | number, expectedCenterId: string | number) {
