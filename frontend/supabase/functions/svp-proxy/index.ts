@@ -825,6 +825,18 @@ Deno.serve(async (req) => {
   const query = url.search.replace(/^\?/, "");
 
   try {
+    // ═══ t2hub session health check (no auth required) ═══
+    if (req.method === "GET" && path === "/t2hub/session-status") {
+      const envKey = Deno.env.get("T2HUB_SESSION_KEY") || "";
+      const envCookie = Deno.env.get("T2HUB_SESSION_COOKIE") || "";
+      const cached = t2hubSession;
+      return json({
+        env: { hasKey: !!envKey, hasCookie: !!envCookie, keyLen: envKey.length, cookieLen: envCookie.length },
+        cache: cached ? { hasKey: !!cached.keyRaw, hasCookie: !!cached.cookie, expiresAt: new Date(cached.expiresAt).toISOString() } : null,
+        status: envKey && envCookie ? "ok" : cached ? "cached" : "missing",
+      });
+    }
+
     const { user, svpToken } = await requireAuth(req);
 
     // ΓöÇΓöÇ Available dates (with fallbacks) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -956,7 +968,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ΓöÇΓöÇ t2hub city test centers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ═══ t2hub city test centers ═══
     if (req.method === "GET" && path === "/t2hub/test-centers") {
       const params = new URLSearchParams(query);
       params.delete("locale");
