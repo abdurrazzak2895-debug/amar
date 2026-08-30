@@ -890,7 +890,26 @@ Deno.serve(async (req) => {
       const sessions = (Array.isArray(sessionsData?.sessions) ? sessionsData.sessions : [])
         .map((item: any) => normalizeT2HubSession(item, centerByName));
 
-      return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: centers });
+      const requestedCenterId = params.get("test_center_id") || "";
+      const activeCenterIds = new Set(
+        sessions.map((s: any) => String(
+          s?.site_id ||
+          s?.test_center?.site_id ||
+          s?.test_center?.id ||
+          s?.test_center_id ||
+          s?.test_center?.test_center_id ||
+          ""
+        ).trim()).filter(Boolean)
+      );
+      const filteredSites = requestedCenterId
+        ? centers.filter((c: any) => String(c.id || c.test_center_id || "") === requestedCenterId)
+        : centers.filter((c: any) => {
+            const id = String(c.id || c.test_center_id || "").trim();
+            if (!id) return false;
+            return activeCenterIds.has(id);
+          });
+
+      return json({ ...sessionsData, sessions, exam_sessions: sessions, sites: filteredSites });
     }
 
     const { user, svpToken } = await requireAuth(req);
