@@ -347,12 +347,13 @@ export default function T2HubLivePage() {
                     {centerSessions.map((s: any, idx: number) => {
                       const seats = s.available_seats || 0;
                       return (
-                        <div key={s.id || idx} style={{ display: "grid", gridTemplateColumns: "1fr 100px 120px 180px", alignItems: "center", padding: "10px 18px", borderBottom: idx < centerSessions.length - 1 ? "1px solid var(--tk-glass-border)" : "none", fontSize: 13 }}>
-                          <div><span style={{ color: "var(--tk-muted)" }}>Date:</span> <strong>{s.exam_date || s.start_date_in_browser_time_zone || "—"}</strong></div>
+                        <div key={s.id || idx} style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px 120px 180px", alignItems: "center", padding: "10px 18px", borderBottom: idx < centerSessions.length - 1 ? "1px solid var(--tk-glass-border)" : "none", fontSize: 13 }}>
+                          <div><span style={{ color: "var(--tk-muted)" }}>Exam:</span> <strong>{s.start_at_in_tc_time_zone || s.exam_date || "—"}</strong></div>
                           <div><span style={{ color: "var(--tk-muted)" }}>Status:</span> <span style={{ color: s.status === "scheduled" ? "var(--tk-success)" : "var(--tk-muted)", fontWeight: 600 }}>{s.status}</span></div>
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${seatColor(seats)}22`, color: seatColor(seats), border: `1px solid ${seatColor(seats)}44`, borderRadius: 6, padding: "3px 10px", fontWeight: 800, fontSize: 13, width: "fit-content" }}>
                             {seats > 0 ? <CircleCheck size={13} /> : <CircleX size={13} />} {seats} seats
                           </div>
+                          <div><span style={{ color: "var(--tk-muted)" }}>Category:</span> <span style={{ fontSize: 11 }}>{s.category?.english_name || "—"}</span></div>
                           <div style={{ fontFamily: "monospace", fontSize: 10, color: "var(--tk-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.session_id || s.id}>{String(s.session_id || s.id).substring(0, 30)}...</div>
                         </div>
                       );

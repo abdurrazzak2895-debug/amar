@@ -103,8 +103,8 @@ const App = () => (
                 <Route path="search" element={<TakamolDashboardPage />} />
               </Route>
 
-              {/* T2Hub Live Check — no auth required */}
-              <Route path="/t2hub/live" element={<T2HubLivePage />} />
+              {/* Takamol Live Check — no auth required */}
+              <Route path="/takamol/live" element={<T2HubLivePage />} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>
