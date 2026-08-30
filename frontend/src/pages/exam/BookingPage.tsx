@@ -614,7 +614,7 @@ export default function BookingPage() {
         const citySet = new Set<string>();
         rawDates.forEach((d: any) => {
           const dateStr = d?.start_date_in_browser_time_zone || d?.start_date_in_tc_time_zone || d?.date || d?.exam_date || (typeof d === "string" ? d : "");
-          const city = d?.test_center?.city || d?.city || "";
+          const city = d?.test_center?.city || d?.city || d?.test_center?.test_center_city || "";
           if (dateStr) dateSet.add(dateStr);
           if (city) citySet.add(city);
         });
@@ -627,7 +627,7 @@ export default function BookingPage() {
       finally { if (active) setLoadingDates(false); }
     })();
     return () => { active = false; };
-  }, [selectedOccupationId, categoryId]);
+  }, [selectedOccupationId, categoryId, selectedCity]);
 
   useEffect(() => {
     setAvailableDate((prev) => (prev && availableDates.includes(prev) ? prev : availableDates[0] || ""));
