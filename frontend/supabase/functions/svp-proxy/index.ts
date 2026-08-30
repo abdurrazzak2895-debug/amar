@@ -1256,6 +1256,67 @@ Deno.serve(async (req) => {
       return new Response(await upstream.arrayBuffer(), { status: 200, headers });
     }
 
+    // ΓöÇΓöÇΓöÇΓöÇ Auto-verify reservation status & refund credits ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    if (req.method === "POST" && path === "/auto-verify-reservations") {
+      const accessCtx = await requireAccessPermission(req, "booking.create");
+      const supabase = accessCtx.supabase;
+      const accountId = accessCtx.account.id;
+      const FINALIZED_RE = /cancel|expired|attended|completed|no[_\s-]?show|absent|refunded|void/i;
+      const results: { reservation_id: string; status: string; action: string; amount?: number }[] = [];
+
+      const reservationsData = await svpFetch("/api/v1/individual_labor_space/exam_reservations?locale=en", {
+        method: "GET", token: svpToken,
+      });
+      const rows = Array.isArray(reservationsData) ? reservationsData
+        : Array.isArray(reservationsData?.exam_reservations) ? reservationsData.exam_reservations
+          : Array.isArray(reservationsData?.data?.exam_reservations) ? reservationsData.data.exam_reservations
+            : [];
+
+      const { data: walletRows } = await supabase
+        .from("wallet_transactions")
+        .select("id,amount,direction,transaction_type,reference_id,metadata,created_at")
+        .eq("account_id", accountId)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      for (const row of rows) {
+        const rid = String(row?.id || row?.reservation_id || row?.exam_reservation_id || "").trim();
+        if (!rid || !/^\d+$/.test(rid)) continue;
+        const status = String(row?.reservation_status || row?.status || row?.cbt_exam_status || "").toLowerCase();
+        if (!FINALIZED_RE.test(status)) continue;
+        const debitTx = (walletRows || []).find((tx: any) =>
+          tx.direction === "debit" &&
+          tx.reference_id === rid &&
+          /booking/i.test(tx.transaction_type || tx.metadata?.operation || "")
+        );
+        if (!debitTx) { results.push({ reservation_id: rid, status, action: "no_debit_found" }); continue; }
+        const alreadyRefunded = (walletRows || []).some((tx: any) =>
+          tx.direction === "credit" &&
+          /refund/i.test(tx.transaction_type || "") &&
+          tx.reference_id === rid
+        );
+        if (alreadyRefunded) { results.push({ reservation_id: rid, status, action: "already_refunded" }); continue; }
+        const refundAmount = Math.abs(Number(debitTx.amount));
+        if (!Number.isFinite(refundAmount) || refundAmount <= 0) { results.push({ reservation_id: rid, status, action: "invalid_amount" }); continue; }
+        const { error: refundErr } = await supabase.rpc("wallet_post_adjustment", {
+          p_account_id: accountId,
+          p_amount: refundAmount,
+          p_direction: "credit",
+          p_transaction_type: "auto_refund",
+          p_idempotency_key: `refund:${rid}:${crypto.randomUUID()}`,
+          p_description: `Auto-refund for finalized reservation #${rid} (status: ${status})`,
+          p_created_by: accountId,
+          p_reference_type: "reservation_refund",
+          p_reference_id: rid,
+          p_metadata: { original_debit_id: debitTx.id, reservation_status: status, auto_verified: true },
+        });
+        if (refundErr) { results.push({ reservation_id: rid, status, action: "refund_failed", amount: refundAmount }); continue; }
+        results.push({ reservation_id: rid, status, action: "refunded", amount: refundAmount });
+      }
+
+      return json({ verified: results.length, results, account_id: accountId });
+    }
+
     // ΓöÇΓöÇ Center-bound temporary seat hold ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if (req.method === "POST" && path === "/temporary-seats") {
       const body = await req.json().catch(() => ({}));
