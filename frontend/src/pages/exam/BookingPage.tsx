@@ -1131,10 +1131,6 @@ export default function BookingPage() {
 
   async function createHold() {
     if (!selectedCenterId || !sessionId) { setError("Select a real test center and exam session first"); return; }
-    // Only hold the SELECTED session, not every session in the city.
-    // Holding the whole city would let SVP confirm a different test center
-    // when the booking POST is made with hold_id, because the hold covers
-    // multiple distinct centers in the same city.
     const selectedSessionId = getSessionPayloadId(getSessionId(selectedSession) || sessionId);
     if (selectedSessionId === null) {
       setError("No valid exam session selected for hold creation");
@@ -1171,11 +1167,37 @@ export default function BookingPage() {
         detail?.error,
         detail?.errors?.temporaryseat?.labor_id?.[0],
       ].filter(Boolean).join(" ");
-      const sessionUnavailable = errorCode === "SESSION_UNAVAILABLE" ||
-        errorCode === "CANDIDATE_LABOR_ID_EXISTS" ||
-        /labor_id.*already been taken/i.test(upstreamText) ||
-        /has already been taken/i.test(upstreamText);
-      if (sessionUnavailable) {
+      const alreadyTaken = /has already been taken/i.test(upstreamText) ||
+        /labor_id.*already been taken/i.test(upstreamText);
+      if (alreadyTaken) {
+        // User already has an active hold — try to fetch it and proceed.
+        setStatus("Session already held. Fetching existing hold...");
+        try {
+          const reservations: any = await api("/exam-reservations?locale=en");
+          const rows = Array.isArray(reservations) ? reservations
+            : Array.isArray(reservations?.exam_reservations) ? reservations.exam_reservations
+              : Array.isArray(reservations?.data?.exam_reservations) ? reservations.data.exam_reservations
+                : pickArray(reservations);
+          const myHold = rows.find((r: any) => {
+            const rid = String(r?.id || r?.reservation_id || "");
+            const state = String(r?.status || r?.state || "").toLowerCase();
+            const rSessionId = String(r?.exam_session_id || r?.exam_session?.id || "");
+            return rSessionId === String(selectedSessionId) && (state.includes("hold") || state.includes("pending") || state === "");
+          });
+          if (myHold) {
+            const holdIdVal = String(myHold.id || myHold.hold_id || myHold.temporary_seat_id || "");
+            setHoldId(holdIdVal);
+            setHoldExpiresAt(String(myHold.expired_at || myHold.expires_at || ""));
+            setSiteId(String(selectedCenterId));
+            setSiteCity(String(selectedCity));
+            setStatus(holdIdVal ? `Existing hold reused: #${holdIdVal}. You can proceed to booking.` : "Existing hold found. You can proceed to booking.");
+          } else {
+            setStatus("Session already held but no active reservation found. Try selecting another session.");
+          }
+        } catch {
+          setStatus("Session already held. You may proceed to booking if you have a valid hold.");
+        }
+      } else if (errorCode === "SESSION_UNAVAILABLE" || errorCode === "CANDIDATE_LABOR_ID_EXISTS") {
         setHoldId("");
         setHoldExpiresAt("");
         setReservationId("");
