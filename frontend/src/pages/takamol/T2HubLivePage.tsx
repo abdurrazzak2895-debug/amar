@@ -181,10 +181,16 @@ export default function T2HubLivePage() {
     <div className="tk-shell" style={{ padding: 0 }}>
       <header className="tk-topbar">
         <div className="tk-brand">
-          <span className="tk-logo" style={{ background: "linear-gradient(135deg, #2dd4bf, #06b6d4)", color: "#0b1230" }}>T2</span>
+          <span className="tk-logo" style={{
+            background: "linear-gradient(135deg, #f0c869, #d4a437)",
+            color: "#0b1230",
+            fontSize: 16,
+            fontWeight: 900,
+            letterSpacing: "-0.02em",
+          }}>FD</span>
           <div>
-            <span style={{ fontWeight: 800 }}>T2Hub Live</span>
-            <span style={{ fontSize: 11, color: "var(--tk-muted)", marginLeft: 8 }}>takamol exam data</span>
+            <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: "0.04em" }}>FLYDURONTO.COM</span>
+            <span style={{ fontSize: 11, color: "var(--tk-muted)", marginLeft: 8 }}>T2Hub Live Data</span>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
