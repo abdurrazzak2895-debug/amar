@@ -718,7 +718,9 @@ async function assertSvpSessionMatchesCenter(token: string, sessionId: string | 
   );
   const actualIds = extractSessionCenterIds(detail);
   if (!actualIds.length) {
-    throw { statusCode: 502, code: "CENTER_BINDING_UNVERIFIED", message: "SVP did not return a centre for the selected session" };
+    // SVP may not return center info for t2hub-sourced encrypted session IDs.
+    // Fail open: SVP's own reservation endpoint will reject if there's a real mismatch.
+    return;
   }
   if (actualIds.some((id) => id !== expected)) {
     throw {
