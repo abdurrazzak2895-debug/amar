@@ -1,22 +1,8 @@
 import { useCallback, useState, useMemo, useEffect } from "react";
-import { MapPin, CalendarDays, RefreshCw, Search, Building2, Users, Armchair, CircleCheck, CircleX, Zap, Filter, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { MapPin, CalendarDays, RefreshCw, Search, Building2, Users, Armchair, CircleCheck, CircleX, Zap, Filter, ChevronLeft, ChevronRight, Clock, Loader2 } from "lucide-react";
 import "@/styles/takamol.css";
 
 const DIVISIONS = ["Dhaka", "Chattogram", "Rajshahi", "Khulna", "Barishal", "Rangpur", "Mymensingh", "Sylhet"];
-
-const CATEGORIES = [
-  { id: 159, name: "Load & Unload Workers" },
-  { id: 158, name: "Cleaners" },
-  { id: 160, name: "Office & Facility Cleaning" },
-  { id: 162, name: "Street Clean Workers" },
-  { id: 6, name: "Painting" },
-  { id: 18, name: "Machine Repair" },
-  { id: 48, name: "Stone Mason" },
-  { id: 58, name: "Sellers" },
-  { id: 59, name: "Tailoring" },
-  { id: 61, name: "Bakery & Pastries" },
-  { id: 72, name: "Taxi Driver" },
-];
 
 const API_BASE = "https://xklwzkraobxetxdcysun.supabase.co/functions/v1/svp-proxy";
 const API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhrbHd6a3Jhb2J4ZXR4ZGN5c3VuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxNTI4ODAsImV4cCI6MjA3MTcyODg4MH0.ZfB5qzYtKjNNoGmzLkNnYKJwZ5oGJ8mL5oY0XqZ6X4";
@@ -157,7 +143,7 @@ function OccupationsFullList({ data }: { data: any }) {
 /* ═══ Main Page ═══ */
 export default function T2HubLivePage() {
   const [division, setDivision] = useState("Rajshahi");
-  const [categoryId, setCategoryId] = useState(159);
+  const [categoryId, setCategoryId] = useState<number | "">("");
   const [examDate, setExamDate] = useState("2026-09-12");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -165,6 +151,27 @@ export default function T2HubLivePage() {
   const [rawJson, setRawJson] = useState<string | null>(null);
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [allOccupations, setAllOccupations] = useState<any[]>([]);
+  const [loadingOccupations, setLoadingOccupations] = useState(true);
+
+  useEffect(() => {
+    api("/t2hub/occupations").then((data) => {
+      const occs = data?.occupations || (Array.isArray(data) ? data : []);
+      setAllOccupations(occs);
+      if (occs.length > 0 && categoryId === "") setCategoryId(occs[0].category_id || "");
+    }).catch(() => {}).finally(() => setLoadingOccupations(false));
+  }, []);
+
+  const categories = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; count: number }>();
+    allOccupations.forEach((o) => {
+      const catId = o.category_id;
+      const catName = o.category_name || `Category ${catId}`;
+      if (!catId) return;
+      if (map.has(catId)) { map.get(catId)!.count++; } else { map.set(catId, { id: catId, name: catName, count: 1 }); }
+    });
+    return [...map.values()].sort((a, b) => b.count - a.count);
+  }, [allOccupations]);
 
   const fetchTestCenters = useCallback(async () => {
     setLoading(true); setError(null); setResult(null); setRawJson(null);
@@ -262,7 +269,10 @@ export default function T2HubLivePage() {
               <select value={division} onChange={e => setDivision(e.target.value)}>{DIVISIONS.map(d => <option key={d} value={d}>{d}</option>)}</select>
             </div>
             <div className="tk-field"><label><Building2 size={13} /> Category</label>
-              <select value={categoryId} onChange={e => setCategoryId(Number(e.target.value))}>{CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+              <select value={categoryId} onChange={e => setCategoryId(Number(e.target.value))} disabled={loadingOccupations}>
+                {loadingOccupations ? <option value="">Loading categories...</option> :
+                 categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
+              </select>
             </div>
             <div className="tk-field"><label><CalendarDays size={13} /> Exam Date</label>
               <input type="date" value={examDate} onChange={e => setExamDate(e.target.value)} />
