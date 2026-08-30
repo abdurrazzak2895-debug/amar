@@ -162,6 +162,15 @@ export default function T2HubLivePage() {
     }).catch(() => {}).finally(() => setLoadingOccupations(false));
   }, []);
 
+  useEffect(() => {
+    if (!categoryId) return;
+    setLoading(true); setError(null);
+    api(`/t2hub/exam-available-dates?category_id=${categoryId}&city=${encodeURIComponent(division)}`)
+      .then((data) => { setResult({ type: "available-dates", data }); setRawJson(JSON.stringify(data, null, 2)); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [division, categoryId]);
+
   const categories = useMemo(() => {
     const map = new Map<number, { id: number; name: string; count: number }>();
     allOccupations.forEach((o) => {
@@ -192,6 +201,16 @@ export default function T2HubLivePage() {
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   }, [division, categoryId, examDate]);
+
+  const fetchPaccSessionsForDate = useCallback(async (date: string) => {
+    setLoading(true); setError(null); setResult(null); setRawJson(null);
+    try {
+      const data = await api(`/t2hub/pacc-exam-sessions?category_id=${categoryId}&city=${encodeURIComponent(division)}&exam_date=${date}`);
+      setResult({ type: "pacc-sessions", data });
+      setRawJson(JSON.stringify(data, null, 2));
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [division, categoryId]);
 
   const fetchAvailableDates = useCallback(async () => {
     setLoading(true); setError(null); setResult(null); setRawJson(null);
@@ -280,7 +299,6 @@ export default function T2HubLivePage() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
             <button className="tk-btn tk-btn--gold" onClick={fetchPaccSessions} disabled={loading}><Zap size={14} /> Find Sessions</button>
-            <button className="tk-btn tk-btn--gold" onClick={fetchAvailableDates} disabled={loading}><CalendarDays size={14} /> Available Dates</button>
             <button className="tk-btn" onClick={fetchTestCenters} disabled={loading}><MapPin size={14} /> All Centers</button>
             <button className="tk-btn" onClick={fetchOccupations} disabled={loading}><Search size={14} /> Occupations</button>
             <button className="tk-btn" onClick={fetchSessionStatus} disabled={loading}><RefreshCw size={14} /> Health</button>
@@ -360,7 +378,7 @@ export default function T2HubLivePage() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <MiniCalendar year={calYear} month={calMonth} availableDates={availableDates} onDateClick={(d) => { setExamDate(d); setCalMonth(new Date(d).getMonth()); setCalYear(new Date(d).getFullYear()); }} selectedDate={examDate} />
+              <MiniCalendar year={calYear} month={calMonth} availableDates={availableDates} onDateClick={(d) => { setExamDate(d); setCalMonth(new Date(d).getMonth()); setCalYear(new Date(d).getFullYear()); fetchPaccSessionsForDate(d); }} selectedDate={examDate} />
               <div>
                 <p style={{ fontSize: 12, color: "var(--tk-muted)", marginBottom: 8 }}><Clock size={13} style={{ verticalAlign: -2 }} /> Available dates ({availableDates.length})</p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 280, overflow: "auto" }}>
@@ -376,7 +394,7 @@ export default function T2HubLivePage() {
                 {availableDates.length > 0 && (
                   <div style={{ marginTop: 16 }}>
                     <p style={{ fontSize: 12, color: "var(--tk-muted)", marginBottom: 8 }}>Selected: <strong style={{ color: "var(--tk-gold)" }}>{examDate || "none"}</strong></p>
-                    <button className="tk-btn tk-btn--gold" onClick={fetchPaccSessions} disabled={!examDate}><Zap size={14} /> Find Sessions for {examDate}</button>
+                    <p style={{ fontSize: 11, color: "var(--tk-teal)" }}>Click any available date to load sessions</p>
                   </div>
                 )}
               </div>
