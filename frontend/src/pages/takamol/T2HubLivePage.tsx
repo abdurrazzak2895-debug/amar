@@ -282,7 +282,7 @@ export default function T2HubLivePage() {
 
         {/* ── Controls ── */}
         <section className="tk-card tk-booking-card" style={{ border: "1px solid var(--tk-glass-border)" }}>
-          <div className="tk-step-heading" style={{ marginBottom: 16 }}><span>01</span><div><p className="tk-eyebrow">QUERY</p><strong>Search exam data</strong></div></div>
+          <div className="tk-step-heading" style={{ marginBottom: 16 }}><span>01</span><div><p className="tk-eyebrow">QUERY</p><strong>Exam Data</strong></div></div>
           <div className="tk-grid tk-grid-3">
             <div className="tk-field"><label><MapPin size={13} /> Division</label>
               <select value={division} onChange={e => setDivision(e.target.value)}>{DIVISIONS.map(d => <option key={d} value={d}>{d}</option>)}</select>
@@ -308,7 +308,6 @@ export default function T2HubLivePage() {
         {loading && (
           <div className="tk-card tk-booking-card" style={{ textAlign: "center", padding: 48 }}>
             <span className="tk-spinner" style={{ width: 28, height: 28 }} />
-            <p style={{ marginTop: 10, color: "var(--tk-muted)", fontSize: 13 }}>Fetching from t2hub.app...</p>
           </div>
         )}
 
@@ -438,18 +437,6 @@ export default function T2HubLivePage() {
 
         {/* ── Occupations ── */}
         {result?.type === "occupations" && !loading && <OccupationsFullList data={result.data} />}
-
-        {/* ── Raw JSON ── */}
-        {rawJson && (
-          <details className="tk-card tk-booking-card" style={{ border: "1px solid var(--tk-glass-border)" }}>
-            <summary style={{ cursor: "pointer", padding: "12px 18px", fontWeight: 600, fontSize: 13, color: "var(--tk-muted)" }}>
-              🔧 Raw JSON ({rawJson.length.toLocaleString()} chars)
-            </summary>
-            <pre style={{ margin: 0, padding: "0 18px 18px", fontSize: 11, fontFamily: "monospace", overflow: "auto", maxHeight: 400, whiteSpace: "pre-wrap", wordBreak: "break-all", color: "var(--tk-text)" }}>
-              {rawJson.length > 6000 ? rawJson.substring(0, 6000) + "\n... (truncated)" : rawJson}
-            </pre>
-          </details>
-        )}
       </main>
     </div>
   );
