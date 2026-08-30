@@ -987,19 +987,27 @@ Deno.serve(async (req) => {
       return json(await t2hubFetch(t2hubQuery("/exam-available-dates", params), req));
     }
 
-    // Keep the existing `/occupations` client contract, while using t2hub's
-    // PACC list when the equivalent SVP route has been removed upstream.
+    // Keep the existing `/occupations` client contract. SVP's public
+    // visitor_space endpoint doesn't require a token; fall back to t2hub's
+    // PACC list when the upstream route is missing.
     if (req.method === "GET" && path === "/occupations") {
       try {
+        return json(await svpFetch(
+          buildPath("/api/v1/visitor_space/occupations", query),
+        ));
+      } catch (err: any) {
+        if (err?.statusCode !== 404) throw err;
+      }
+      try {
+        const params = new URLSearchParams(query);
+        params.delete("locale");
+        return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params), req));
+      } catch {
+        // final fallback: try individual_labor_space (authenticated)
         return json(await svpFetch(
           buildPath("/api/v1/individual_labor_space/occupations", query),
           { method: "GET", token: svpToken },
         ));
-      } catch (err: any) {
-        if (err?.statusCode !== 404) throw err;
-        const params = new URLSearchParams(query);
-        params.delete("locale");
-        return json(await t2hubFetch(t2hubQuery("/pacc/occupations", params), req));
       }
     }
 
