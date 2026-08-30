@@ -158,7 +158,7 @@ export default function T2HubLivePage() {
     api("/t2hub/occupations").then((data) => {
       const occs = data?.occupations || (Array.isArray(data) ? data : []);
       setAllOccupations(occs);
-      if (occs.length > 0 && categoryId === "") setCategoryId(occs[0].category_id || "");
+      if (occs.length > 0 && categoryId === "") setCategoryId(occs[0].id || "");
     }).catch(() => {}).finally(() => setLoadingOccupations(false));
   }, []);
 
@@ -174,7 +174,7 @@ export default function T2HubLivePage() {
   const categories = useMemo(() => {
     const map = new Map<number, { id: number; name: string; count: number }>();
     allOccupations.forEach((o) => {
-      const catId = o.category_id;
+      const catId = o.id ?? o.category_id;
       const catName = o.category_name || `Category ${catId}`;
       if (!catId) return;
       if (map.has(catId)) { map.get(catId)!.count++; } else { map.set(catId, { id: catId, name: catName, count: 1 }); }
