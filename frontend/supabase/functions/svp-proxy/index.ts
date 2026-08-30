@@ -143,8 +143,18 @@ async function getBookingCreditCost(supabase: ReturnType<typeof getSupabase>, ag
 }
 
 function findReservationId(value: any): string {
+  // Top-level id (SVP may return { id: 12345 } directly)
+  if (value?.id !== undefined && value?.id !== null && value?.id !== "") {
+    const v = String(value.id).trim();
+    if (v && /^\d+$/.test(v)) return v;
+  }
   const direct = value?.exam_reservation?.id || value?.reservation?.id || value?.data?.exam_reservation?.id || value?.data?.reservation?.id;
   if (direct !== undefined && direct !== null && direct !== "") return String(direct);
+  // data.id — SVP may wrap response in { data: { id: ... } }
+  if (value?.data?.id !== undefined && value?.data?.id !== null && value?.data?.id !== "") {
+    const v = String(value.data.id).trim();
+    if (v && /^\d+$/.test(v)) return v;
+  }
   const queue = [value];
   const seen = new Set<any>();
   while (queue.length) {
