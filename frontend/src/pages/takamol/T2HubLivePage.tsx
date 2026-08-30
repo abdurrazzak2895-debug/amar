@@ -243,7 +243,6 @@ export default function T2HubLivePage() {
           }}>FD</span>
           <div>
             <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: "0.04em" }}>FLYDURONTO.COM</span>
-            <span style={{ fontSize: 11, color: "var(--tk-muted)", marginLeft: 8 }}>T2Hub Live Data</span>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
